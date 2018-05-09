@@ -1,6 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+def loader():
+    with np.load('prediction-challenge-01-data.npz') as f:
+        X = f['data_x']
+        y = f['data_y']
+        X_test = f['test_x']
+    return X, y, X_test
+
+
 with np.load('prediction-challenge-01-data.npz') as fh:
     data_x = fh['data_x']
     data_y = fh['data_y']
