@@ -13,3 +13,8 @@ ind = np.random.randint(0, test_x.shape[0] - 1)
 plt.imshow(test_x[ind, 0])
 plt.title(answers_y[ind])
 plt.show()
+
+
+ok = np.loadtxt('prediction.txt')
+d = answers_y == ok
+print(np.mean(d))
