@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
 
 def loader():
@@ -10,11 +12,11 @@ def loader():
     # 1. INDEX: IMAGE SERIAL NUMBER (6000)
     # 2. INDEX: COLOR CHANNELS (3)
     # 3/4. INDEX: PIXEL VALUE (32 x 32)
-    print(data_x.shape, data_x.dtype)
-    print(data_y.shape, data_y.dtype)
+    print(X.shape, X.dtype)
+    print(y.shape, y.dtype)
     
     # TEST DATA: INPUT (x) ONLY
-    print(test_x.shape, test_x.dtype)
+    print(X_test.shape, X_test.dtype)
     return X, y, X_test
 
 
@@ -27,4 +29,17 @@ def saver(prediction):
     np.save('prediction.npy', prediction)
 
 if __name__ == '__main__':
-    pass
+    X, y, X_test = loader()
+    X = np.rot90(np.moveaxis(X, 1, 3), 0, (1, 2))
+
+    plt.imshow(X[2])
+    plt.title(y[0])
+    plt.show()
+
+    # plt.imshow(X[:, 0, 0])
+    # plt.title(y[0])
+    # plt.show()
+    #
+    # plt.imshow(X[:, 0, 0])
+    # plt.show()
+
