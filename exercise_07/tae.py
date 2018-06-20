@@ -19,8 +19,8 @@ minibatches = []
 for i in range(x.shape[0] - length_minib + 1):
     minibatches.append((x[i:i + length_minib], y[i:i + length_minib]))
 
-timeseries_x = tf.placeholder(tf.float32, shape=[None, length_minib, timeseries.shape[-1]])
-timeseries_y = tf.placeholder(tf.float32, shape=[None, length_minib, timeseries.shape[-1]])
+timeseries_x = tf.placeholder(tf.float32, shape=[length_minib, timeseries.shape[-1]])
+timeseries_y = tf.placeholder(tf.float32, shape=[length_minib, timeseries.shape[-1]])
 loss, encoded, decoded = network.time_lagged_autoencoder(timeseries_x, timeseries_y)
 train = tf.train.AdamOptimizer().minimize(loss)
 
