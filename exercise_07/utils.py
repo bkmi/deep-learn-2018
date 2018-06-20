@@ -22,6 +22,11 @@ def load(verbose=False):
     return data_x, validation_x, validation_y
 
 
+def save(timeseries_y):
+    assert timeseries_y.ndim == 1
+    np.save('prediction.npy', timeseries_y)
+
+
 def lag_data(data, lag=0):
     """Lags data on axis=0."""
     assert data.shape[0] > lag, 'you need more samples than lag'
@@ -49,10 +54,15 @@ def whiten(x, axis=0):
     return np.tensordot(x, cxx, axes=(1, 0))
 
 
-def cluster_compare(true_states, predicted_states):
+def cluster(timeseries):
     kmeans = KMeans(n_clusters=4, random_state=0)
-    clustered = kmeans.fit(predicted_states)
-    return adjusted_rand_score(true_states, clustered)
+    clustered = kmeans.fit(timeseries)
+    return clustered
+
+
+def cluster_compare(true_states, predicted_states):
+    clustered = cluster(predicted_states)
+    return adjusted_rand_score(true_states, clustered.labels_)
 
 
 def shuffle(x):
