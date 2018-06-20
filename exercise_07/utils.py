@@ -1,6 +1,10 @@
+import random
+
 import numpy as np
 
 from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score
 from scipy.linalg import fractional_matrix_power
 
 
@@ -43,3 +47,15 @@ def whiten(x, axis=0):
     n = np.take(x.shape, axis)
     cxx = fractional_matrix_power(np.matmul(x.T, x) / n, -1/2)
     return np.tensordot(x, cxx, axes=(1, 0))
+
+
+def cluster_compare(true_states, predicted_states):
+    kmeans = KMeans(n_clusters=4, random_state=0)
+    clustered = kmeans.fit(predicted_states)
+    return adjusted_rand_score(true_states, clustered)
+
+
+def shuffle(x):
+    y = x.copy()
+    random.shuffle(y)
+    return y
