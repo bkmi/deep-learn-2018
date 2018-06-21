@@ -12,7 +12,7 @@ lag = 1
 assert lag > 0
 x, y = utils.lag_data(timeseries, lag=lag)
 x, y = utils.whiten(x), utils.whiten(y)
-val_x, val_y = utils.lag_data(validate_timeseries, lag=lag)
+val_x, val_y = utils.lag_data(validate_timeseries, lag=0)
 val_x, val_y = utils.whiten(val_x), utils.whiten(val_y)
 
 # length_minib = val_x.shape[0]
@@ -29,18 +29,22 @@ epochs = 1500
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     for i in range(epochs):
-        _, _, fitting_dim_reduction = sess.run([train, loss, encoded],
-                                               feed_dict={timeseries_x: x,
-                                                          timeseries_y: y})
+        _, _ = sess.run([train, loss],
+                        feed_dict={timeseries_x: x,
+                                   timeseries_y: y})
 
         if i % 500 == 0:
             validation_loss, validation_dim_reduction = sess.run([loss, encoded],
                                                                  feed_dict={timeseries_x: val_x,
                                                                             timeseries_y: val_y})
             print('Validation loss: {}'.format(validation_loss))
-            score = utils.cluster_compare(validate_labels[:-lag], validation_dim_reduction)
+            score = utils.cluster_compare(validate_labels, validation_dim_reduction)
             print('Adjusted Rand Index: {}'.format(score))
 
-    pred_timeseries_y = utils.cluster(fitting_dim_reduction)
+    encoded_timeseries = sess.run(encoded,
+                                  feed_dict={timeseries_x: timeseries,
+                                             timeseries_y: timeseries})
+
+    pred_timeseries_y = utils.cluster(encoded_timeseries)
     print(pred_timeseries_y.labels_)
     utils.save(pred_timeseries_y.labels_)
