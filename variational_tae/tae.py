@@ -23,7 +23,10 @@ val_x, val_y = utils.whiten(val_x), utils.whiten(val_y)
 timeseries_x = tf.placeholder(tf.float32, shape=[None, timeseries.shape[-1]])
 timeseries_y = tf.placeholder(tf.float32, shape=[None, timeseries.shape[-1]])
 count_timesteps = tf.placeholder(tf.int32, shape=[1])
-loss, encoded_mean, encoded_stdd, encoded, decoded = network.time_lagged_variational_autoencoder(timeseries_x, timeseries_y, count_timesteps)
+training_status = tf.placeholder(tf.bool, shape=[])
+
+net_out = network.time_lagged_variational_autoencoder(timeseries_x, timeseries_y, count_timesteps, training_status)
+loss, encoded_mean, encoded_stdd, encoded, decoded = net_out
 train = tf.train.AdamOptimizer().minimize(loss)
 
 epochs = 1500
@@ -33,15 +36,16 @@ with tf.Session() as sess:
         _, _ = sess.run([train, loss],
                         feed_dict={timeseries_x: x,
                                    timeseries_y: y,
-                                   count_timesteps: [x.shape[0]]})
+                                   count_timesteps: [x.shape[0]],
+                                   training_status: True})
 
         if i % 500 == 0:
             validation_loss, validation_dim_reduction, enc_stdd = sess.run(
                 [loss, encoded_mean, encoded_stdd],
                 feed_dict={timeseries_x: val_x,
                            timeseries_y: val_y,
-                           count_timesteps: [val_x.shape[0]]})
-            print(validation_dim_reduction)
+                           count_timesteps: [val_x.shape[0]],
+                           training_status: False})
             print('Validation loss: {}'.format(validation_loss))
             score = utils.cluster_compare(validate_labels[:-1], validation_dim_reduction)
             print('Adjusted Rand Index: {}'.format(score))
@@ -49,7 +53,8 @@ with tf.Session() as sess:
     encoded_timeseries = sess.run(encoded,
                                   feed_dict={timeseries_x: timeseries,
                                              timeseries_y: timeseries,
-                                             count_timesteps: [timeseries.shape[0]]})
+                                             count_timesteps: [timeseries.shape[0]],
+                                             training_status: False})
 
     pred_timeseries_y = utils.cluster(encoded_timeseries)
     print(pred_timeseries_y.labels_)
