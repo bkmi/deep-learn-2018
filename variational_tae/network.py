@@ -46,4 +46,4 @@ def time_lagged_variational_autoencoder(timeseries_x, timeseries_y, count_timest
     kl_divergence = -0.5 * tf.reduce_sum(
         tf.square(encoded_mean) + tf.square(encoded_stdd) - tf.log(tf.square(encoded_stdd)) - 1)
     loss = -kl_divergence + reconstruction_loss
-    return loss, encoded, decoded
+    return loss, encoded_mean, encoded_stdd, encoded, decoded
