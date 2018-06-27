@@ -12,7 +12,7 @@ lag = 1
 assert lag > 0
 x, y = utils.lag_data(timeseries, lag=lag)
 x, y = utils.whiten(x), utils.whiten(y)
-val_x, val_y = utils.lag_data(validate_timeseries, lag=0)
+val_x, val_y = utils.lag_data(validate_timeseries, lag=0)  # maybe with lag
 val_x, val_y = utils.whiten(val_x), utils.whiten(val_y)
 
 # length_minib = val_x.shape[0]
@@ -36,7 +36,7 @@ with tf.Session() as sess:
                                              count_timesteps: [x.shape[0]]})
 
         if i % 500 == 0:
-            validation_loss, validation_dim_reduction = sess.run([loss, encoded],
+            validation_loss, validation_dim_reduction = sess.run([loss, encoded],  # try before sampling
                                                                  feed_dict={timeseries_x: val_x,
                                                                             timeseries_y: val_y,
                                                                             count_timesteps: [val_x.shape[0]]})
