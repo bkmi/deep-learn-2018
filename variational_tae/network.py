@@ -51,9 +51,9 @@ def time_lagged_variational_autoencoder(timeseries_x,
     # reconstruction error is over multiple samples
     # dataset error is N/M sum(term,
     # reconstruction_loss = tf.reduce_sum(tf.reduce_mean(tf.squared_difference(timeseries_y, decoded), 1))
-    reconstruction_loss = tf.reduce_mean(tf.squared_difference(timeseries_y, decoded))
+    reconstruction_loss = tf.reduce_sum(tf.squared_difference(timeseries_y, decoded), axis=1)
     kl_divergence = tf.reduce_sum(
-        0.5 * (tf.square(encoded_mean) + tf.square(encoded_stdd) - tf.log(tf.square(encoded_stdd)) - 1))
+        0.5 * (tf.square(encoded_mean) + tf.square(encoded_stdd) - tf.log(tf.square(encoded_stdd)) - 1), axis=1)
     loss = kl_divergence + reconstruction_loss
-    loss = tf.Print(loss, [kl_divergence, reconstruction_loss])
+    loss = tf.Print(loss, [tf.reduce_sum(kl_divergence), tf.reduce_sum(reconstruction_loss)])
     return loss, encoded_mean, encoded_stdd, encoded, decoded
