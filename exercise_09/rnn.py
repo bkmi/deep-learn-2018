@@ -4,7 +4,8 @@ import numpy as np
 from keras.preprocessing import sequence
 from keras.models import Sequential
 from keras.layers import Dense, LSTM, Dropout, Conv1D, MaxPooling1D, BatchNormalization
-
+from keras.callbacks import EarlyStopping
+from keras.optimizers import adam
 
 data_x, data_y, vali_x, vali_y, test_x = utils.load(verbose=True,
                                                     vectorize=True)
@@ -39,15 +40,24 @@ model.add(LSTM(count_possible_labels))
 model.add(Dropout(0.5))
 model.add(Dense(count_possible_labels,
                 activation='softmax'))
+
+
+opt = adam(lr=.0095,
+           beta_1=0.85,
+           beta_2=0.995)
 model.compile(loss='categorical_crossentropy',
-              optimizer='adam',
+              optimizer=opt,
               metrics=['accuracy'])
+
+early_stop = EarlyStopping(min_delta=0.01,
+                           patience=5)
 print(model.summary())
 model.fit(data_x,
           data_y,
           epochs=100,
           batch_size=32,
-          validation_data=(vali_x, vali_y))
+          validation_data=(vali_x, vali_y),
+          callbacks=early_stop)
 
 scores = model.predict_classes(test_x)
 print(scores)
