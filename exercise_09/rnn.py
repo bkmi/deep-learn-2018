@@ -1,4 +1,4 @@
-import exercise_09.utils as utils
+import utils as utils
 import numpy as np
 
 from keras.preprocessing import sequence
@@ -17,14 +17,6 @@ count_possible_labels = data_y.shape[1]
 
 model = Sequential()
 model.add(Conv1D(filters=64,
-                 kernel_size=100,
-                 padding='same',
-                 activation='relu',
-                 input_shape=(max_string_length, count_features)))
-model.add(Dropout(0.5))
-model.add(MaxPooling1D(pool_size=2))
-model.add(BatchNormalization())
-model.add(Conv1D(filters=32,
                  kernel_size=50,
                  padding='same',
                  activation='relu',
@@ -32,10 +24,18 @@ model.add(Conv1D(filters=32,
 model.add(Dropout(0.5))
 model.add(MaxPooling1D(pool_size=2))
 model.add(BatchNormalization())
-model.add(LSTM(count_possible_labels,
+model.add(Conv1D(filters=32,
+                 kernel_size=25,
+                 padding='same',
+                 activation='relu',
+                 input_shape=(max_string_length, count_features)))
+model.add(Dropout(0.5))
+model.add(MaxPooling1D(pool_size=2))
+model.add(BatchNormalization())
+model.add(LSTM(count_possible_labels*2,
                return_sequences=True))
 model.add(Dropout(0.5))
-model.add(LSTM(1))
+model.add(LSTM(count_possible_labels))
 model.add(Dropout(0.5))
 model.add(Dense(count_possible_labels,
                 activation='softmax'))
