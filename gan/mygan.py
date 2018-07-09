@@ -58,16 +58,41 @@ def discriminator(img, weight_decay=4e-5):
 
     return net
 
+
+def combine_batches(real_images, fabri_images, batch_size):
+    real_batch = tf.train.batch(real_images,
+                                batch_size=batch_size,
+                                enqueue_many=True)
+    # Batch does not work this way. look at
+    # https://www.tensorflow.org/api_guides/python/reading_data#Preloaded_data
+    label_batch = tf.concat([tf.ones(real_batch.shape[0]),
+                             tf.zeros(fabri_images.shape[0])],
+                            axis=0)
+    combi_batch = tf.concat([real_images, fabri_images],
+                            axis=0)
+    combi_batch, label_batch = tf.map_fn(lambda x: tf.random_shuffle(x, seed=42),
+                                         [combi_batch, label_batch])
+    return combi_batch, label_batch
+
+
 train_x, train_y, test_x, test_y = load_mnist_data()
 batch_size, noise_dims = 32, 64
-
-gen = generator(tf.random_normal([batch_size, noise_dims]))
+epochs = 10
 
 real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
-dis = discriminator(real_images)
+# real_images = tf.constant(np.repeat(train_x, epochs), dtype=tf.float32, shape=[None, 28, 28, 1])
+fabri_images = generator(tf.random_normal([batch_size, noise_dims]))
+combi_batch, label_batch = combine_batches(real_images, fabri_images, batch_size)
 
-# learn = tf.train.AdamOptimizer().minimize(loss)
+dis = discriminator(combi_batch)
+
+# gen_loss = None
+# dis_loss = None
+#
+# gen_learn = None
+# dis_learn = None
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-
+    for _ in range(epochs):
+        aa, bb = sess.run([combi_batch, label_batch], feed_dict={real_images: train_x})
