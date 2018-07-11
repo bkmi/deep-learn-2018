@@ -6,7 +6,6 @@ import matplotlib.pylab as plt
 
 from sklearn.preprocessing import LabelBinarizer
 
-from tensorflow.contrib.gan import gan_model
 
 def load_mnist_data():
     train, test = tf.keras.datasets.mnist.load_data()
@@ -31,13 +30,9 @@ def generator(noise, weight_decay=2.5e-5):
                                         normalizer_fn=layers.batch_norm,
                                         weights_regularizer=layers.l2_regularizer(weight_decay)):
         net = layers.fully_connected(noise, 1024)
-        net = tf.Print(net, [net, tf.reduce_mean(net)])
         net = layers.fully_connected(net, 7 * 7 * 128)
-        net = tf.Print(net, [net, tf.reduce_mean(net)])
         net = tf.reshape(net, [-1, 7, 7, 128])
-        net = tf.Print(net, [net, tf.reduce_mean(net)])
         net = layers.conv2d_transpose(net, 64, [4, 4], stride=2)
-        net = tf.Print(net, [net, tf.reduce_mean(net)])
         net = layers.conv2d_transpose(net, 32, [4, 4], stride=2)
     net = layers.conv2d(net, 1, [4, 4], normalizer_fn=None, activation_fn=tf.sigmoid)
 
@@ -54,25 +49,48 @@ def discriminator(img, weight_decay=4e-5):
         net = layers.conv2d(net, 128, [4, 4], stride=2)
         net = layers.flatten(net)
         net = layers.fully_connected(net, 1024, normalizer_fn=layers.layer_norm)
-    net = layers.fully_connected(net, 2, activation_fn=tf.nn.softmax)
+    net = layers.fully_connected(net, 1, activation_fn=tf.nn.sigmoid)
 
     return net
 
 
-def combine_batches(real_images, fabri_images, batch_size):
-    real_batch = tf.train.batch(real_images,
-                                batch_size=batch_size,
-                                enqueue_many=True)
-    # Batch does not work this way. look at
-    # https://www.tensorflow.org/api_guides/python/reading_data#Preloaded_data
-    label_batch = tf.concat([tf.ones(real_batch.shape[0]),
-                             tf.zeros(fabri_images.shape[0])],
-                            axis=0)
-    combi_batch = tf.concat([real_images, fabri_images],
-                            axis=0)
-    combi_batch, label_batch = tf.map_fn(lambda x: tf.random_shuffle(x, seed=42),
-                                         [combi_batch, label_batch])
-    return combi_batch, label_batch
+def mix_real_and_fabricated(real_images, fabri_images):
+    dataset = tf.data.Dataset.from_tensor_slices(real_images)
+    dataset = dataset.shuffle(buffer_size=train_x.shape[0])
+    dataset = dataset.batch(batch_size=batch_size // 2)
+
+    iterator = dataset.make_initializable_iterator()
+    next_element = iterator.get_next()
+
+    labeled_images = (tf.concat([tf.cast(next_element, fabri_images.dtype), fabri_images], axis=0),
+                      tf.concat([tf.ones(batch_size // 2), tf.zeros(batch_size // 2)], axis=0))
+    labeled_images = tuple(map(lambda x: tf.random_shuffle(x, seed=42), labeled_images))
+    return labeled_images, iterator
+
+
+def pair_real_and_fabricated(real_images, fabri_images):
+    dataset = tf.data.Dataset.from_tensor_slices(real_images)
+    dataset = dataset.shuffle(buffer_size=train_x.shape[0])
+    dataset = dataset.batch(batch_size=batch_size)
+
+    iterator = dataset.make_initializable_iterator()
+    next_element = iterator.get_next()
+
+    # paired_images = (tf.concat([tf.cast(next_element, fabri_images.dtype), fabri_images], axis=0),
+    #                  tf.concat([tf.ones(batch_size), tf.zeros(batch_size)], axis=0))
+    paired_images = (next_element, fabri_images)
+    paired_images = tuple(map(lambda x: tf.random_shuffle(x, seed=42), paired_images))
+    return paired_images, iterator
+
+
+def iterate(predicate, images, iterator, session):
+    session.run(iterator.initializer, feed_dict={real_images: images})
+    while True:
+        try:
+            result = session.run(predicate)
+        except tf.errors.OutOfRangeError:
+            break
+    return result
 
 
 train_x, train_y, test_x, test_y = load_mnist_data()
@@ -80,19 +98,25 @@ batch_size, noise_dims = 32, 64
 epochs = 10
 
 real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
-# real_images = tf.constant(np.repeat(train_x, epochs), dtype=tf.float32, shape=[None, 28, 28, 1])
 fabri_images = generator(tf.random_normal([batch_size, noise_dims]))
-combi_batch, label_batch = combine_batches(real_images, fabri_images, batch_size)
+paired_images, iterator = pair_real_and_fabricated(real_images, fabri_images)
 
-dis = discriminator(combi_batch)
+D_real = discriminator(paired_images[0])
+D_fake = discriminator(paired_images[1])
 
-# gen_loss = None
-# dis_loss = None
-#
-# gen_learn = None
-# dis_learn = None
+D_loss = -tf.reduce_mean(tf.log(D_real) + tf.log(1. - D_fake))
+G_loss = -tf.reduce_mean(tf.log(D_fake))
+
+# Now I need to keep track of which variables to update.
+# start with this easy example then later implement the better loss function
+# https://wiseodd.github.io/techblog/2016/09/17/gan-tensorflow/
+# better loss: https://www.alexirpan.com/2017/02/22/wasserstein-gan.html
+D_solver = tf.train.AdamOptimizer().minimize(D_loss, var_list=theta_D)
+G_solver = tf.train.AdamOptimizer().minimize(G_loss, var_list=theta_G)
+
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     for _ in range(epochs):
-        aa, bb = sess.run([combi_batch, label_batch], feed_dict={real_images: train_x})
+        images, labels = iterate(paired_images, train_x, iterator, sess)
+        images, labels = iterate(paired_images, test_x, iterator, sess)
