@@ -77,8 +77,8 @@ def generator(noise, is_training):
 def discriminator(img):
     with tf.variable_scope(name_or_scope="discriminator", reuse=tf.AUTO_REUSE):
         x = tf.layers.flatten(img)
-        x = tf.layers.dense(x, 128, activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer())
-        x = tf.layers.dense(x, 1, activation=tf.nn.sigmoid, kernel_initializer=tf.contrib.layers.xavier_initializer())
+        x = tf.layers.dense(x, 1, activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer())
+        # x = tf.layers.dense(x, 1, activation=tf.nn.sigmoid, kernel_initializer=tf.contrib.layers.xavier_initializer())
     return x
 
 
@@ -123,16 +123,6 @@ def create_dataset(real_images):
     return next_element, iterator
 
 
-def iterate(predicate, images, iterator, session):
-    session.run(iterator.initializer, feed_dict={real_images: images})
-    while True:
-        try:
-            result = session.run(predicate)
-        except tf.errors.OutOfRangeError:
-            break
-    return result
-
-
 def plot(samples):
     fig = plt.figure(figsize=(4, 4))
     gs = gridspec.GridSpec(4, 4)
@@ -150,13 +140,15 @@ def plot(samples):
 
 
 train_x, train_y, test_x, test_y = load_mnist_data()
-batch_size, noise_dims = 128, 100
+batch_size, noise_dims = 32, 100
 epochs = 20
 
 real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
 is_training = tf.placeholder_with_default(True, shape=())
 # fabri_images = generator(tf.random_normal([batch_size, noise_dims]), is_training)
-fabri_batch = generator(tf.random_uniform(shape=[batch_size, noise_dims], minval=-1, maxval=1),
+noise = tf.random_uniform(shape=[batch_size, noise_dims], minval=-1, maxval=1)
+noise = tf.Print(noise, [noise])
+fabri_batch = generator(noise,
                         is_training)
 # paired_images, iterator = pair_real_and_fabricated(real_images, fabri_images)
 real_batch, iterator = create_dataset(real_images)
@@ -164,19 +156,18 @@ real_batch, iterator = create_dataset(real_images)
 D_real = discriminator(real_batch)
 D_fake = discriminator(fabri_batch)
 
-D_loss = -tf.reduce_mean(tf.log(D_real + 1e-12) + tf.log(1. - D_fake + 1e-12))
-G_loss = -tf.reduce_mean(tf.log(D_fake + 1e-12))
+D_loss = tf.reduce_mean(D_real) - tf.reduce_mean(D_fake)
+G_loss = -tf.reduce_mean(D_fake)
 
-# Now I need to keep track of which variables to update.
-# start with this easy example then later implement the better loss function
-# https://wiseodd.github.io/techblog/2016/09/17/gan-tensorflow/
-# better loss: https://www.alexirpan.com/2017/02/22/wasserstein-gan.html
-D_solver = tf.train.AdamOptimizer().minimize(
-    D_loss,
-    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'))
-G_solver = tf.train.AdamOptimizer().minimize(
+D_solver = (tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(
+    -D_loss,
+    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator')))
+G_solver = (tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(
     G_loss,
-    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'))
+    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator')))
+
+clip_D = [p.assign(tf.clip_by_value(p, -0.01, 0.01)) for p in tf.get_collection(
+    tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator')]
 
 saver = tf.train.Saver()
 
@@ -184,48 +175,45 @@ saver = tf.train.Saver()
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     for _ in range(epochs):
-        # images, labels = iterate(paired_images, train_x, iterator, sess)
-        # images, labels = iterate(paired_images, test_x, iterator, sess)
-
         sess.run(iterator.initializer, feed_dict={real_images: train_x})
         while True:
             try:
-                _, dis_loss = sess.run([D_solver, D_loss])
+                for _ in range(5):
+                    _, dis_loss, _ = sess.run([D_solver, D_loss, clip_D])
                 _, gen_loss = sess.run([G_solver, G_loss])
-                # _, _, gen_loss, dis_loss = sess.run(
-                #     [G_solver, D_solver, G_loss, D_loss]
-                # )
-                # print(gen_loss, dis_loss)
             except tf.errors.OutOfRangeError:
                 break
 
         some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
-        fig = plot(some_fake_images[:15, ...])
+        fig = plot(some_fake_images[:16, ...])
         plt.show()
 
         saver.save(sess, "save_here/save.ckpt")
 
-with tf.Session() as sess:
-    saver.restore(sess, "save_here/save.ckpt")
 
-    for _ in range(10):
-        # images, labels = iterate(paired_images, train_x, iterator, sess)
-        # images, labels = iterate(paired_images, test_x, iterator, sess)
 
-        sess.run(iterator.initializer, feed_dict={real_images: train_x})
-        while True:
-            try:
-                _, dis_loss = sess.run([D_solver, D_loss])
-                _, gen_loss = sess.run([G_solver, G_loss])
-                # _, _, gen_loss, dis_loss = sess.run(
-                #     [G_solver, D_solver, G_loss, D_loss]
-                # )
-                # print(gen_loss, dis_loss)
-            except tf.errors.OutOfRangeError:
-                break
 
-        some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
-        fig = plot(some_fake_images[:15, ...])
-        plt.show()
-
-        saver.save(sess, "save_here/save.ckpt")
+# with tf.Session() as sess:
+#     saver.restore(sess, "save_here/save.ckpt")
+#
+#     for _ in range(10):
+#         # images, labels = iterate(paired_images, train_x, iterator, sess)
+#         # images, labels = iterate(paired_images, test_x, iterator, sess)
+#
+#         sess.run(iterator.initializer, feed_dict={real_images: train_x})
+#         while True:
+#             try:
+#                 _, dis_loss = sess.run([D_solver, D_loss])
+#                 _, gen_loss = sess.run([G_solver, G_loss])
+#                 # _, _, gen_loss, dis_loss = sess.run(
+#                 #     [G_solver, D_solver, G_loss, D_loss]
+#                 # )
+#                 # print(gen_loss, dis_loss)
+#             except tf.errors.OutOfRangeError:
+#                 break
+#
+#         some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
+#         fig = plot(some_fake_images[:15, ...])
+#         plt.show()
+#
+#         saver.save(sess, "save_here/save.ckpt")
