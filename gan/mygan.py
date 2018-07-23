@@ -1,9 +1,10 @@
 import tensorflow as tf
 import numpy as np
 
-import tensorflow.contrib.layers as layers
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+
+from tensorflow.examples.tutorials.mnist import input_data
 
 from sklearn.preprocessing import LabelBinarizer
 
@@ -19,118 +20,60 @@ def load_mnist_data():
     return train_x, train_y, test_x, test_y
 
 
-def img_show(img):
-    plt.axis('off')
-    plt.imshow(np.squeeze(img), cmap='gray')
-    plt.show()
-
-
-# def generator(noise, is_training, weight_decay=2.5e-5):
-#     with tf.variable_scope(name_or_scope="generator", reuse=tf.AUTO_REUSE):
-#         with tf.contrib.framework.arg_scope(
-#                 [layers.fully_connected, layers.conv2d_transpose],
-#                 activation_fn=tf.nn.relu,
-#                 normalizer_fn=layers.batch_norm,
-#                 weights_regularizer=layers.l2_regularizer(weight_decay)), \
-#              tf.contrib.framework.arg_scope(
-#                  [layers.batch_norm],
-#                  is_training=is_training,
-#                  zero_debias_moving_mean=True):
-#             net = layers.fully_connected(noise, 1024)
-#             net = layers.fully_connected(net, 7 * 7 * 128)
-#             net = tf.reshape(net, [-1, 7, 7, 128])
-#             net = layers.conv2d_transpose(net, 64, [4, 4], stride=2)
-#             net = layers.conv2d_transpose(net, 32, [4, 4], stride=2)
-#         net = layers.conv2d(
-#             net,
-#             1,
-#             [4, 4],
-#             normalizer_fn=None,
-#             activation_fn=tf.sigmoid
-#         )
-#
-#     return net
-
-def generator(noise, is_training):
-    with tf.variable_scope(name_or_scope="generator", reuse=tf.AUTO_REUSE):
-        x = tf.layers.dense(noise, 128, activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer())
-        x = tf.layers.dense(x, 28 * 28, activation=tf.nn.sigmoid, kernel_initializer=tf.contrib.layers.xavier_initializer())
+def generator(noise, reuse=False):
+    with tf.variable_scope(name_or_scope="generator", reuse=reuse):
+        x = tf.layers.dense(
+            noise,
+            128,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+            name='relu',
+            reuse=reuse
+        )
+        x = tf.layers.dense(
+            x,
+            28 * 28,
+            activation=tf.nn.sigmoid,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+            name='sig',
+            reuse=reuse
+        )
         x = tf.reshape(x, shape=[-1, 28, 28, 1])
     return x
 
 
-# def discriminator(img, weight_decay=4e-5):
-#     with tf.variable_scope(name_or_scope=None, default_name="discriminator"):
-#         with tf.contrib.framework.arg_scope([layers.conv2d, layers.fully_connected],
-#                                             activation_fn=tf.nn.leaky_relu,
-#                                             normalizer_fn=None,
-#                                             weights_regularizer=layers.l2_regularizer(weight_decay),
-#                                             biases_regularizer=layers.l2_regularizer(weight_decay)):
-#             net = layers.conv2d(img, 64, [4, 4], stride=2)
-#             net = layers.conv2d(net, 128, [4, 4], stride=2)
-#             net = layers.flatten(net)
-#             net = layers.fully_connected(net, 1024, normalizer_fn=layers.layer_norm)
-#         net = layers.fully_connected(net, 1, activation_fn=tf.nn.sigmoid)
-#
-#     return net
-
-def discriminator(img):
-    with tf.variable_scope(name_or_scope="discriminator", reuse=tf.AUTO_REUSE):
+def discriminator(img, reuse=False):
+    with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
         x = tf.layers.flatten(img)
-        x = tf.layers.dense(x, 128, activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer())
-        x = tf.layers.dense(x, 1, activation=tf.nn.sigmoid, kernel_initializer=tf.contrib.layers.xavier_initializer())
+        x = tf.layers.dense(
+            x,
+            128,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+            name='relu',
+            reuse=reuse
+        )
+        x = tf.layers.dense(
+            x,
+            1,
+            activation=tf.nn.sigmoid,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+            name='sig',
+            reuse=reuse
+        )
     return x
 
 
-# def mix_real_and_fabricated(real_images, fabri_images):
-#     dataset = tf.data.Dataset.from_tensor_slices(real_images)
-#     dataset = dataset.shuffle(buffer_size=train_x.shape[0])
-#     dataset = dataset.batch(batch_size=batch_size // 2)
-#
-#     iterator = dataset.make_initializable_iterator()
-#     next_element = iterator.get_next()
-#
-#     labeled_images = (tf.concat([tf.cast(next_element, fabri_images.dtype), fabri_images], axis=0),
-#                       tf.concat([tf.ones(batch_size // 2), tf.zeros(batch_size // 2)], axis=0))
-#     labeled_images = tuple(map(lambda x: tf.random_shuffle(x, seed=42), labeled_images))
-#     return labeled_images, iterator
-
-
-# def pair_real_and_fabricated(real_images, fabri_images):
-#     dataset = tf.data.Dataset.from_tensor_slices(real_images)
-#     dataset = dataset.shuffle(buffer_size=train_x.shape[0])
-#     dataset = dataset.apply(tf.contrib.data.batch_and_drop_remainder(batch_size=batch_size))
-#
-#     iterator = dataset.make_initializable_iterator()
-#     next_element = iterator.get_next()
-#
-#     # paired_images = (tf.concat([tf.cast(next_element, fabri_images.dtype), fabri_images], axis=0),
-#     #                  tf.concat([tf.ones(batch_size), tf.zeros(batch_size)], axis=0))
-#     paired_images = (next_element, fabri_images)
-#     # maybe it doesn't matter which order they are given in since it is a batch
-#     # paired_images = tuple(map(lambda x: tf.random_shuffle(x, seed=42), paired_images))
-#     return paired_images, iterator
-
-
 def create_dataset(real_images):
-    dataset = tf.data.Dataset.from_tensor_slices(real_images)
-    dataset = dataset.shuffle(buffer_size=train_x.shape[0])
-    dataset = dataset.apply(tf.contrib.data.batch_and_drop_remainder(batch_size=batch_size))
+    with tf.name_scope('dataset_iteratior'):
+        dataset = tf.data.Dataset.from_tensor_slices(real_images)
+        dataset = dataset.shuffle(buffer_size=train_x.shape[0])
+        dataset = dataset.apply(tf.contrib.data.batch_and_drop_remainder(batch_size=batch_size))
 
-    iterator = dataset.make_initializable_iterator()
-    next_element = iterator.get_next()
+        iterator = dataset.make_initializable_iterator()
+        next_element = iterator.get_next()
 
     return next_element, iterator
-
-
-def iterate(predicate, images, iterator, session):
-    session.run(iterator.initializer, feed_dict={real_images: images})
-    while True:
-        try:
-            result = session.run(predicate)
-        except tf.errors.OutOfRangeError:
-            break
-    return result
 
 
 def plot(samples):
@@ -150,27 +93,25 @@ def plot(samples):
 
 
 train_x, train_y, test_x, test_y = load_mnist_data()
-batch_size, noise_dims = 32, 100
-epochs = 1
+batch_size, noise_dims = 128, 100
+epochs = 500
 
-real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
-is_training = tf.placeholder_with_default(True, shape=())
-# fabri_images = generator(tf.random_normal([batch_size, noise_dims]), is_training)
-fabri_batch = generator(tf.random_uniform(shape=[batch_size, noise_dims], minval=-1, maxval=1),
-                        is_training)
-# paired_images, iterator = pair_real_and_fabricated(real_images, fabri_images)
-real_batch, iterator = create_dataset(real_images)
+# real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1], name='real_images')
+# real_batch, iterator = create_dataset(real_images)
+real_batch = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
 
-full_batch = tf.concat([fabri_batch, real_batch], axis=0)
-D_full = discriminator(full_batch)
-D_real = D_full[batch_size:, ...]
-D_fake = D_full[:batch_size, ...]
+# noise = tf.random_uniform(shape=[batch_size, noise_dims], minval=-1, maxval=1, name='noise')
+noise = tf.placeholder(shape=[None, noise_dims], dtype=tf.float32)
+fabri_batch = generator(noise)
 
-# D_real = discriminator(real_batch)
-# D_fake = discriminator(fabri_batch)
+D_real = discriminator(real_batch, reuse=False)
+D_fake = discriminator(fabri_batch, reuse=True)
 
-D_loss = -tf.reduce_mean(tf.log(D_real + 1e-12) + tf.log(1. - D_fake + 1e-12))
-G_loss = -tf.reduce_mean(tf.log(D_fake + 1e-12))
+tf.summary.image('real', real_batch, 4)
+tf.summary.image('fabr', fabri_batch, 4)
+
+D_loss = -tf.reduce_mean(tf.log(D_real + 1e-12) + tf.log(1. - D_fake + 1e-12), name='discriminator_loss')
+G_loss = -tf.reduce_mean(tf.log(D_fake + 1e-12), name='generator_loss')
 
 # Now I need to keep track of which variables to update.
 # start with this easy example then later implement the better loss function
@@ -178,32 +119,64 @@ G_loss = -tf.reduce_mean(tf.log(D_fake + 1e-12))
 # better loss: https://www.alexirpan.com/2017/02/22/wasserstein-gan.html
 D_solver = tf.train.AdamOptimizer().minimize(
     D_loss,
-    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'))
+    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'),
+    name='discriminator_solver'
+)
 G_solver = tf.train.AdamOptimizer().minimize(
     G_loss,
-    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'))
+    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'),
+    name='generator_solver'
+)
+
+def sample_Z(m, n):
+    return np.random.uniform(-1., 1., size=[m, n])
+
+for i in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
+    tf.summary.histogram(i.name, i)
+
+mnist = input_data.read_data_sets('mnist_data', one_hot=True)
 
 saver = tf.train.Saver()
+merged_summary = tf.summary.merge_all()
 
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    for _ in range(epochs):
-        # images, labels = iterate(paired_images, train_x, iterator, sess)
-        # images, labels = iterate(paired_images, test_x, iterator, sess)
 
-        sess.run(iterator.initializer, feed_dict={real_images: train_x})
-        while True:
-            try:
-                _, dis_loss = sess.run([D_solver, D_loss])
-                _, gen_loss = sess.run([G_solver, G_loss])
+    writer = tf.summary.FileWriter('/tmp/mygan/1')
+    writer.add_graph(sess.graph)
 
-                print(dis_loss, gen_loss)
-            except tf.errors.OutOfRangeError:
-                break
+    for i in range(epochs):
+        # sess.run(iterator.initializer, feed_dict={real_images: train_x})
 
-        some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
-        fig = plot(some_fake_images[:15, ...])
+        for j in range(train_x.shape[0] // 128):
+            X_mb, _ = mnist.train.next_batch(batch_size)
+            X_mb = np.reshape(X_mb, newshape=[-1, 28, 28, 1])
+
+            _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={real_batch: X_mb,
+                                                                     noise: sample_Z(batch_size, noise_dims)})
+            _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={noise: sample_Z(batch_size, noise_dims)})
+
+        s = sess.run(merged_summary, feed_dict={real_batch: X_mb,
+                                                noise: sample_Z(batch_size, noise_dims)})
+        writer.add_summary(s, i)
+
+
+        # s = sess.run(merged_summary)
+        # writer.add_summary(s, i)
+        #
+        # while True:
+        #     try:
+        #         _, dis_loss, samps1 = sess.run([D_solver, D_loss, noise])
+        #         _, gen_loss, samps2 = sess.run([G_solver, G_loss, noise])
+        #
+        #         # print(np.isclose(samps1, samps2))
+        #         # print(dis_loss, gen_loss)
+        #     except tf.errors.OutOfRangeError:
+        #         break
+
+        some_fake_images = sess.run(fabri_batch, feed_dict={noise: sample_Z(16, noise_dims)})
+        fig = plot(some_fake_images)
         plt.show()
 
         # saver.save(sess, "save_here/save.ckpt")
