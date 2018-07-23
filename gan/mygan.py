@@ -150,8 +150,8 @@ def plot(samples):
 
 
 train_x, train_y, test_x, test_y = load_mnist_data()
-batch_size, noise_dims = 128, 100
-epochs = 20
+batch_size, noise_dims = 32, 100
+epochs = 1
 
 real_images = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
 is_training = tf.placeholder_with_default(True, shape=())
@@ -161,8 +161,13 @@ fabri_batch = generator(tf.random_uniform(shape=[batch_size, noise_dims], minval
 # paired_images, iterator = pair_real_and_fabricated(real_images, fabri_images)
 real_batch, iterator = create_dataset(real_images)
 
-D_real = discriminator(real_batch)
-D_fake = discriminator(fabri_batch)
+full_batch = tf.concat([fabri_batch, real_batch], axis=0)
+D_full = discriminator(full_batch)
+D_real = D_full[batch_size:, ...]
+D_fake = D_full[:batch_size, ...]
+
+# D_real = discriminator(real_batch)
+# D_fake = discriminator(fabri_batch)
 
 D_loss = -tf.reduce_mean(tf.log(D_real + 1e-12) + tf.log(1. - D_fake + 1e-12))
 G_loss = -tf.reduce_mean(tf.log(D_fake + 1e-12))
@@ -192,10 +197,8 @@ with tf.Session() as sess:
             try:
                 _, dis_loss = sess.run([D_solver, D_loss])
                 _, gen_loss = sess.run([G_solver, G_loss])
-                # _, _, gen_loss, dis_loss = sess.run(
-                #     [G_solver, D_solver, G_loss, D_loss]
-                # )
-                # print(gen_loss, dis_loss)
+
+                print(dis_loss, gen_loss)
             except tf.errors.OutOfRangeError:
                 break
 
@@ -203,29 +206,29 @@ with tf.Session() as sess:
         fig = plot(some_fake_images[:15, ...])
         plt.show()
 
-        saver.save(sess, "save_here/save.ckpt")
+        # saver.save(sess, "save_here/save.ckpt")
 
-with tf.Session() as sess:
-    saver.restore(sess, "save_here/save.ckpt")
-
-    for _ in range(10):
-        # images, labels = iterate(paired_images, train_x, iterator, sess)
-        # images, labels = iterate(paired_images, test_x, iterator, sess)
-
-        sess.run(iterator.initializer, feed_dict={real_images: train_x})
-        while True:
-            try:
-                _, dis_loss = sess.run([D_solver, D_loss])
-                _, gen_loss = sess.run([G_solver, G_loss])
-                # _, _, gen_loss, dis_loss = sess.run(
-                #     [G_solver, D_solver, G_loss, D_loss]
-                # )
-                # print(gen_loss, dis_loss)
-            except tf.errors.OutOfRangeError:
-                break
-
-        some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
-        fig = plot(some_fake_images[:15, ...])
-        plt.show()
-
-        saver.save(sess, "save_here/save.ckpt")
+# with tf.Session() as sess:
+#     saver.restore(sess, "save_here/save.ckpt")
+#
+#     for _ in range(10):
+#         # images, labels = iterate(paired_images, train_x, iterator, sess)
+#         # images, labels = iterate(paired_images, test_x, iterator, sess)
+#
+#         sess.run(iterator.initializer, feed_dict={real_images: train_x})
+#         while True:
+#             try:
+#                 _, dis_loss = sess.run([D_solver, D_loss])
+#                 _, gen_loss = sess.run([G_solver, G_loss])
+#                 # _, _, gen_loss, dis_loss = sess.run(
+#                 #     [G_solver, D_solver, G_loss, D_loss]
+#                 # )
+#                 # print(gen_loss, dis_loss)
+#             except tf.errors.OutOfRangeError:
+#                 break
+#
+#         some_fake_images = sess.run(fabri_batch, feed_dict={is_training: False})
+#         fig = plot(some_fake_images[:15, ...])
+#         plt.show()
+#
+#         saver.save(sess, "save_here/save.ckpt")
