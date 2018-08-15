@@ -3,17 +3,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def create_masked_dataset(data, labels, batch_size, data_shape=(28, 28), mask=None):
+def create_masked_dataset(data, labels, batch_size, image_shape=(28, 28), mask=None):
     def gen():
         for image, label in zip(data, labels):
             yield image, label
-    ds = tf.data.Dataset.from_generator(gen, (tf.float32, tf.int32), (data_shape, ()))
+    ds = tf.data.Dataset.from_generator(gen, (tf.float32, tf.int32), (image_shape, ()))
     if mask is None:
-        mask = np.ones(shape=data_shape)
+        mask = np.ones(shape=image_shape)
     return ds.map(lambda x, y: (x * mask, y)).repeat().batch(batch_size)
 
-
-def create_square_mask(image_shape=(28, 28), blank_shape=(14, 14)):
+# fix shape = 3 for a pic
+def create_square_mask(image_shape=(28, 28, 1), blank_shape=(14, 14, 1)):
     for i, j in zip(image_shape, blank_shape):
         assert i >= j
     mask = np.ones(shape=image_shape)
@@ -35,10 +35,23 @@ def gallery(array, ncols=3):
 
 
 def main():
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
 
-    train_dataset = create_masked_dataset(x_train, y_train, batch_size=10, mask=create_square_mask())
-    valid_dataset = create_masked_dataset(x_test, y_test, batch_size=20, mask=create_square_mask())
+    train_dataset = create_masked_dataset(
+        x_train,
+        y_train,
+        batch_size=10,
+        image_shape=x_train.shape[1:],
+        mask=create_square_mask(image_shape=x_train.shape[1:], blank_shape=(16, 16, 3))
+    )
+    valid_dataset = create_masked_dataset(
+        x_test,
+        y_test,
+        batch_size=20,
+        image_shape=x_train.shape[1:],
+        mask=create_square_mask(image_shape=x_train.shape[1:], blank_shape=(16, 16, 3))
+    )
 
     handle = tf.placeholder(tf.string, shape=[])
     iterator = tf.data.Iterator.from_string_handle(handle, train_dataset.output_types, train_dataset.output_shapes)
