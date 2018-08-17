@@ -9,8 +9,12 @@ def valid_conv_math(input_width, filter_width, stride):
     return (input_width - filter_width)//stride + 1
 
 
+def valid_conv_transpose_math(input_width, filter_width, stride):
+    return (input_width - 1) * stride + filter_width
+
+
 class ContextEncoder:
-    def __init__(self, batch_size=100, image_dim=32, filters=48, count_conv=4):
+    def __init__(self, input_tensor, batch_size=100, image_dim=32, filters=48, count_conv=4):
         self.batch_size = tf.placeholder_with_default(np.int64(batch_size), shape=())
 
         self.count_conv = count_conv - 1
@@ -23,22 +27,12 @@ class ContextEncoder:
         self.latent_dim = self.filters * self.convd_dim ** 2
 
         self.is_training = tf.placeholder_with_default(True, shape=())
-        self.image_input = tf.placeholder(dtype=tf.float32, shape=[None, 28, 28, 1])
-        self.image_batch, self.iterator, _ = self._make_dataset_iterator()
-        self.z_mean, self.z_log_var = self._encoder()
-        self.z = self._sampler()
+        self.image_batch = input_tensor
+
+        self.z = self._encoder()
         self.decoded = self._decoder()
 
         self.loss, self.optimization, self.reconstruction_loss, self.latent_loss = self._make_loss_opt()
-
-    def _make_dataset_iterator(self):
-        dataset = tf.data.Dataset.from_tensor_slices(self.image_input)
-        dataset = dataset.shuffle(buffer_size=20000)
-        dataset = dataset.batch(batch_size=self.batch_size)
-
-        iterator = dataset.make_initializable_iterator()
-        image_batch = iterator.get_next()
-        return image_batch, iterator, dataset
 
     def _encoder(self):
         conv_kwargs = {'kernel_size': 3, 'filters': self.filters, 'padding': 'valid', 'activation': tf.nn.leaky_relu}
@@ -50,23 +44,15 @@ class ContextEncoder:
         x = tf.layers.dense(x, units=self.latent_dim, activation=tf.nn.leaky_relu)
         return x
 
-    def _sampler(self):
-        self.samples = tf.random_normal(shape=[self.batch_size, self.latent_dim],
-                                        mean=0.,
-                                        stddev=1.,
-                                        dtype=tf.float32)
-        z = self.z_mean + tf.sqrt(tf.exp(self.z_log_var)) * self.samples
-        return z
-
     def _decoder(self):
-        conv_kwargs = {'padding': 'valid', 'strides': 1}
+        conv_kwargs = {'filters': self.filters, 'padding': 'valid', 'activation': tf.nn.leaky_relu}
         x = tf.layers.dense(self.z, units=self.latent_dim, activation=tf.nn.leaky_relu)
-        x = tf.layers.dense(x, units=self.latent_dim ** 2, activation=tf.nn.leaky_relu)
-        x = tf.reshape(x, shape=[-1, self.convd_dim, self.convd_dim, 16])
-        x = tf.layers.conv2d_transpose(x, kernel_size=5, filters=16, activation=tf.nn.leaky_relu, **conv_kwargs)
-        x = tf.layers.conv2d_transpose(x, kernel_size=5, filters=16, activation=tf.nn.leaky_relu, **conv_kwargs)
-        x = tf.layers.conv2d(x, kernel_size=3, filters=8, activation=tf.nn.leaky_relu, **conv_kwargs)
-        decoded = tf.layers.conv2d(x, kernel_size=3, filters=1, padding='same', activation=tf.nn.sigmoid)
+        x = tf.reshape(x, shape=[-1, self.convd_dim, self.convd_dim, self.filters])
+        for _ in range(self.count_conv):
+            x = tf.layers.conv2d_transpose(x, kernel_size=4, strides=2, **conv_kwargs)
+        x = tf.layers.conv2d_transpose(x, kernel_size=3, strides=1, **conv_kwargs)
+        x = tf.layers.conv2d(x, kernel_size=3, filters=3, padding='same', activation=tf.nn.leaky_relu)
+        decoded = tf.layers.conv2d(x, kernel_size=3, filters=3, padding='same', activation=tf.nn.sigmoid)
         return decoded
 
     def _make_loss_opt(self):
@@ -116,11 +102,14 @@ def main():
     image, cutout, label = iterator.get_next()
 
     train_iterator, valid_iterator = [i.make_one_shot_iterator() for i in (train_dataset, valid_dataset)]
+    ce = ContextEncoder(image)
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
         train_handle, valid_handle = sess.run([train_iterator.string_handle(), valid_iterator.string_handle()])
+        a, b = sess.run([image, ce.decoded], feed_dict={handle: train_handle})
+
 
         train_img, train_cutout, train_label = sess.run([image, cutout, label], feed_dict={handle: train_handle})
         valid_img, valid_cutout, valid_label = sess.run([image, cutout, label], feed_dict={handle: valid_handle})
