@@ -30,7 +30,7 @@ def create_square_mask(image_shape=(28, 28, 1), blank_dim=(14, 14), negate=False
         return ~mask
     else:
         return mask
-    
+
 
 def create_cifar10(normalize=True, squeeze=True):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
@@ -39,7 +39,6 @@ def create_cifar10(normalize=True, squeeze=True):
     if squeeze:
         y_train, y_test = (i.squeeze() for i in (y_train, y_test))
     return (x_train, y_train), (x_test, y_test)
-
 
 
 def gallery(array, ncols=3):
@@ -55,9 +54,7 @@ def gallery(array, ncols=3):
 
 def main():
     # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-    x_train, x_test = (i/x_train.max() for i in (x_train, x_test))
-    y_train, y_test = (i.squeeze() for i in (y_train, y_test))
+    (x_train, y_train), (x_test, y_test) = create_cifar10()
 
     blank_dim = (i//4 for i in x_train.shape[1:3])
     train_dataset = create_masked_dataset(
