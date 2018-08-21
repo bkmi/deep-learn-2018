@@ -3,6 +3,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shape=(), buffer_size=10000):
+    def gen():
+        for image, label in zip(data, labels):
+            yield image, label
+    ds = tf.data.Dataset.from_generator(
+        gen,
+        (tf.float32, tf.int32),
+        (image_shape, label_shape)
+    )
+    return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size)
+
+
 def create_masked_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shape=(), mask=None):
     def gen():
         for image, label in zip(data, labels):
@@ -13,17 +25,17 @@ def create_masked_dataset(data, labels, batch_size, image_shape=(28, 28, 1), lab
         (image_shape, image_shape, label_shape)
     )
     if mask is None:
-        mask = np.ones(shape=image_shape, dtype=np.bool)
-    return ds.map(lambda x, y, z: (x * mask, tf.boolean_mask(y, ~mask), z)).repeat().batch(batch_size)
+        mask = np.zeros(shape=image_shape, dtype=np.bool)
+    return ds.map(lambda x, y, z: (x * (~mask), tf.boolean_mask(y, mask), z)).repeat().batch(batch_size)
 
 
 def create_square_mask(image_shape=(28, 28, 1), blank_dim=(14, 14), negate=False):
     image_dim, count_chan = image_shape[:2], image_shape[2]
     for i, j in zip(image_dim, blank_dim):
         assert i >= j
-    mask = np.ones(shape=image_shape, dtype=np.bool)
+    mask = np.zeros(shape=image_shape, dtype=np.bool)
     srow, scol = (int((x - y)/2) for x, y in zip(image_dim, blank_dim))
-    mask[srow:srow + blank_dim[0], scol:scol + blank_dim[1], :] = 0.0
+    mask[srow:srow + blank_dim[0], scol:scol + blank_dim[1], :] = True
 
     assert mask.shape == tuple(image_shape)
     if negate:
