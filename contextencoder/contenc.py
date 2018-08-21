@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import bbox
+import matplotlib.pyplot as plt
 
 from functools import partial
 
@@ -101,7 +102,7 @@ class ContextEncoder:
             )
         return x
 
-    def _context_encoder_loss(self):
+    def _context_encoder_loss(self, reconstruct_coef=0.999):
         # mask is 1s when dropped, 0s when not dropped
         reconstruction_loss = tf.reduce_sum(
             tf.squared_difference(self.cutout, self.decoded),
@@ -114,7 +115,7 @@ class ContextEncoder:
             name='generator_loss'
         )
 
-        loss = reconstruction_loss + adversarial_loss
+        loss = reconstruct_coef * reconstruction_loss + (1 - reconstruct_coef) * adversarial_loss
 
         opt = tf.train.AdamOptimizer(learning_rate=1e-5).minimize(
             loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='context'),
@@ -158,8 +159,8 @@ class ContextEncoder:
 def main():
     (x_train, y_train), (x_test, y_test) = bbox.create_cifar10()
     blank_dim = [i//4 for i in x_train.shape[1:3]]
-    batch_size = 35
-    epochs = 10
+    batch_size = 500
+    epochs = 2
 
     mask = bbox.create_square_mask(image_shape=x_train.shape[1:], blank_dim=blank_dim)
 
@@ -176,20 +177,29 @@ def main():
     iterator = tf.data.Iterator.from_string_handle(handle, train_dataset.output_types, train_dataset.output_shapes)
     image, label = iterator.get_next()
 
-    train_iterator, valid_iterator = [i.make_one_shot_iterator() for i in (train_dataset, valid_dataset)]
     ce = ContextEncoder(image, mask)
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        train_handle, valid_handle = sess.run([train_iterator.string_handle(), valid_iterator.string_handle()])
+
         for _ in range(epochs):
+            train_iterator = train_dataset.make_one_shot_iterator()
+            train_handle = sess.run(train_iterator.string_handle())
             while True:
                 try:
                     ce_loss, r_loss, a_loss, d_loss = ce.train_batch(sess, feed_dict={handle: train_handle})
                 except tf.errors.OutOfRangeError:
                     break
             print(f'ce: {ce_loss}, rec: {r_loss}, adv: {a_loss}, dis: {d_loss}')
+
+        valid_iterator = valid_dataset.make_one_shot_iterator()
+        valid_handle = sess.run(valid_iterator.string_handle())
+
         image, masked, decoded = ce.compute_batch(sess, feed_dict={handle: valid_handle})
+        plt.imshow(masked[0])
+        plt.show()
+        plt.imshow(masked[0] + decoded[0])
+        plt.show()
 
 
 if __name__ == '__main__':
