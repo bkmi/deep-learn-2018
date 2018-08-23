@@ -1,8 +1,7 @@
 import tensorflow as tf
-import numpy as np
-import bbox
 import matplotlib.pyplot as plt
 
+from pathlib import Path
 from functools import partial
 
 
@@ -14,32 +13,69 @@ def valid_conv_transpose_math(input_width, filter_width, stride):
     return (input_width - 1) * stride + filter_width
 
 
+def image_grid(x, size=4):
+    t = tf.unstack(x[:size * size], num=size * size, axis=0)
+    rows = [tf.concat(t[i * size:(i + 1) * size], axis=0)
+            for i in range(size)]
+    image = tf.concat(rows, axis=1)
+    return image
+
+
+def create_cifar10(normalize=True, squeeze=True):
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+    if normalize:
+        x_train, x_test = (i / x_train.max() for i in (x_train, x_test))
+    if squeeze:
+        y_train, y_test = (i.squeeze() for i in (y_train, y_test))
+    return (x_train, y_train), (x_test, y_test)
+
+
+def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shape=(), buffer_size=10000):
+    def gen():
+        for image, label in zip(data, labels):
+            yield image, label
+    ds = tf.data.Dataset.from_generator(
+        gen,
+        (tf.float32, tf.int32),
+        (image_shape, label_shape)
+    )
+    return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size)
+
+
 class ContextEncoder:
-    def __init__(self, batch_tensor, filters=48, count_conv=4):
+    def __init__(self, batch_tensor, filters=48, count_conv=4, learning_rate=1e-3):
         self.image_batch = batch_tensor
         self.image_dim = [int(i) for i in self.image_batch.shape[1:]]
         self.mask_dim = [self.image_dim[0] // 4, self.image_dim[1] // 4, 3]
         self.border_px = 2
+        self.learning_rate = learning_rate
 
-        self.mask = tf.image.resize_image_with_crop_or_pad(
-            tf.ones(shape=self.mask_dim, dtype=tf.bool),
-            self.image_dim[0],
-            self.image_dim[1]
-        )
-        self.over = tf.image.resize_image_with_crop_or_pad(
-            tf.ones(shape=[self.mask_dim[0] + self.border_px, self.mask_dim[1] + self.border_px, 3], dtype=tf.bool),
-            self.image_dim[0],
-            self.image_dim[1]
-        )
-        self.border = self.mask ^ self.over
+        with tf.variable_scope('mask'):
+            self.mask = tf.image.resize_image_with_crop_or_pad(
+                tf.ones(shape=self.mask_dim, dtype=tf.bool),
+                self.image_dim[0],
+                self.image_dim[1]
+            )
+        with tf.variable_scope('overlap_region'):
+            self.over = tf.image.resize_image_with_crop_or_pad(
+                tf.ones(shape=[self.mask_dim[0] + self.border_px, self.mask_dim[1] + self.border_px, 3], dtype=tf.bool),
+                self.image_dim[0],
+                self.image_dim[1]
+            )
+        with tf.variable_scope('border_region'):
+            self.border = tf.logical_xor(self.mask, self.over)
 
-        self.masked_batch = (
-                tf.cast(~self.mask, dtype=tf.float32) * self.image_batch
-                + 0.5 * tf.cast(self.mask, dtype=tf.float32)
-        )
-        self.cutout_batch = tf.reshape(tf.boolean_mask(self.image_batch, self.mask, axis=1), shape=[-1] + self.mask_dim)
+        with tf.variable_scope('masked_input'):
+            self.masked_batch = tf.add(
+                tf.cast(~self.mask, dtype=tf.float32) * self.image_batch,
+                0.5 * tf.cast(self.mask, dtype=tf.float32)
+            )
+        with tf.variable_scope('cutout'):
+            self.cutout_batch = tf.reshape(
+                tf.boolean_mask(self.image_batch, self.mask, axis=1), shape=[-1] + self.mask_dim
+            )
 
-        self.is_training = tf.placeholder_with_default(True, shape=())
+        self.is_training = tf.placeholder_with_default(True, shape=(), name='is_training')
         self.count_conv = count_conv - 1
         self.filters = filters
 
@@ -55,54 +91,56 @@ class ContextEncoder:
 
         self.z = self._encoder()
         self.decoded = self._decoder()
-        self.padded_decoded = tf.image.resize_image_with_crop_or_pad(
-            self.decoded,
-            int(self.image_batch.shape[1]),
-            int(self.image_batch.shape[2])
-        )
-        self.output_batch = tf.reshape(
-            tf.boolean_mask(self.padded_decoded, self.mask, axis=1),
-            shape=[-1] + self.mask_dim
-        )
-        self.output_padded = tf.image.resize_image_with_crop_or_pad(
-            self.output_batch,
-            self.image_dim[0],
-            self.image_dim[1]
-        )
+        with tf.variable_scope('padded_decoded_including_overlap'):
+            self.padded_decoded = tf.image.resize_image_with_crop_or_pad(
+                self.decoded,
+                int(self.image_batch.shape[1]),
+                int(self.image_batch.shape[2])
+            )
+        with tf.variable_scope('output_batch'):
+            self.output_batch = tf.reshape(
+                tf.boolean_mask(self.padded_decoded, self.mask, axis=1),
+                shape=[-1] + self.mask_dim,
+                name='output_batch'
+            )
+        with tf.variable_scope('output_padded'):
+            self.output_padded = tf.image.resize_image_with_crop_or_pad(
+                self.output_batch,
+                self.image_dim[0],
+                self.image_dim[1]
+            )
 
-        self.d_fake = self._discriminator(self.output_batch, reuse=False, is_training=False)
-        self.d_real = self._discriminator(self.cutout_batch, reuse=True, is_training=True)
+        self.d_fake = self._discriminator(self.output_batch, reuse=False)
+        self.d_real = self._discriminator(self.cutout_batch, reuse=True)
 
         self.loss, self.optimization, self.reconstruction_loss, self.adversarial_loss = self._context_encoder_loss()
         self.d_loss, self.d_opt = self._discriminator_loss()
 
     def _encoder(self):
-        with tf.variable_scope('context'):
-            with tf.variable_scope('encoder'):
-                conv_kwargs = {'kernel_size': 3, 'padding': 'valid', 'activation': tf.nn.leaky_relu}
-                count_filters = self.filters // (2 ** (self.count_conv - 1))
-                x = tf.layers.conv2d(self.masked_batch, strides=1, filters=count_filters, **conv_kwargs)
-                x = tf.layers.batch_normalization(x, training=self.is_training)
-                for i in range(self.count_conv):
-                    count_filters = self.filters // (2 ** (self.count_conv - i - 1))
-                    x = tf.layers.conv2d(x, strides=2, filters=count_filters, **conv_kwargs)
-                x = tf.layers.flatten(x)
-                x = tf.layers.dense(x, units=self.latent_dim, activation=tf.nn.leaky_relu)
+        with tf.variable_scope('context_encoder'):
+            conv_kwargs = {'kernel_size': 3, 'padding': 'valid', 'activation': tf.nn.leaky_relu}
+            count_filters = self.filters // (2 ** (self.count_conv - 1))
+            x = tf.layers.conv2d(self.masked_batch, strides=1, filters=count_filters, **conv_kwargs)
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            for i in range(self.count_conv):
+                count_filters = self.filters // (2 ** (self.count_conv - i - 1))
+                x = tf.layers.conv2d(x, strides=2, filters=count_filters, **conv_kwargs)
+            x = tf.layers.flatten(x)
+            x = tf.layers.dense(x, units=self.latent_dim, activation=tf.nn.leaky_relu)
         return x
 
     def _decoder(self):
-        with tf.variable_scope('context'):
-            with tf.variable_scope('decoder'):
-                conv_kwargs = {'kernel_size': 3, 'strides': 1, 'padding': 'valid', 'activation': tf.nn.relu}
-                x = tf.layers.dense(self.z, units=self.latent_dim, activation=tf.nn.relu)
-                x = tf.reshape(x, shape=[-1, self.convd_dim, self.convd_dim, self.filters])
-                for i in range(self.count_conv + 1):
-                    count_filters = self.filters // (2 ** i)
-                    x = tf.layers.conv2d_transpose(x, filters=count_filters, **conv_kwargs)
-                decoded = tf.layers.conv2d(x, kernel_size=3, filters=3, padding='same', activation=tf.nn.sigmoid)
+        with tf.variable_scope('context_decoder'):
+            conv_kwargs = {'kernel_size': 3, 'strides': 1, 'padding': 'valid', 'activation': tf.nn.relu}
+            x = tf.layers.dense(self.z, units=self.latent_dim, activation=tf.nn.relu)
+            x = tf.reshape(x, shape=[-1, self.convd_dim, self.convd_dim, self.filters])
+            for i in range(self.count_conv + 1):
+                count_filters = self.filters // (2 ** i)
+                x = tf.layers.conv2d_transpose(x, filters=count_filters, **conv_kwargs)
+            decoded = tf.layers.conv2d(x, kernel_size=3, filters=3, padding='same', activation=tf.nn.sigmoid)
         return decoded
 
-    def _discriminator(self, input_tensor, reuse=False, is_training=False):
+    def _discriminator(self, input_tensor, reuse=False):
         conv_kwargs = {
             'kernel_size': 3,
             'strides': 1,
@@ -113,7 +151,7 @@ class ContextEncoder:
         count_filters = self.filters // (2 ** (self.count_conv - 1))
         with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
             x = tf.layers.conv2d(input_tensor, filters=count_filters, name='conv0', **conv_kwargs)
-            x = tf.layers.batch_normalization(x, training=is_training)
+            x = tf.layers.batch_normalization(x, training=self.is_training)
             for i in range(self.count_conv - 1):
                 conv_name = 'conv' + str(i + 1)
                 count_filters = self.filters // (2 ** (self.count_conv - i - 1))
@@ -129,87 +167,118 @@ class ContextEncoder:
         return x
 
     def _context_encoder_loss(self, reconstruct_coef=0.999):
+        with tf.variable_scope(name_or_scope="context_encoder_loss"):
+            reconstruction_loss = tf.reduce_sum(
+                tf.squared_difference(
+                    tf.boolean_mask(self.image_batch, self.mask, axis=1),
+                    tf.boolean_mask(self.padded_decoded, self.mask, axis=1)
+                ),
+                axis=[1],
+                name='reconstruction_loss_cutout'
+            )
 
-        reconstruction_loss = tf.reduce_sum(
-            tf.squared_difference(
-                tf.boolean_mask(self.image_batch, self.mask, axis=1),
-                tf.boolean_mask(self.padded_decoded, self.mask, axis=1)
-            ),
-            axis=[1]
-        )
+            reconstruction_loss += 10 * tf.reduce_sum(
+                tf.squared_difference(
+                    tf.boolean_mask(self.image_batch, self.border, axis=1),
+                    tf.boolean_mask(self.padded_decoded, self.border, axis=1)
+                ),
+                axis=[1],
+                name='reconstruction_loss_overlap'
+            )
 
-        reconstruction_loss += 10 * tf.reduce_sum(
-            tf.squared_difference(
-                tf.boolean_mask(self.image_batch, self.border, axis=1),
-                tf.boolean_mask(self.padded_decoded, self.border, axis=1)
-            ),
-            axis=[1]
-        )
+            reconstruction_loss = tf.reduce_mean(reconstruction_loss, name='reconstruction_loss_total')
 
-        reconstruction_loss = tf.reduce_mean(reconstruction_loss)
+            adversarial_loss = -tf.reduce_mean(
+                tf.log(self.d_fake + 1e-12),
+                name='adversarial_loss'
+            )
 
-        adversarial_loss = -tf.reduce_mean(
-            tf.log(self.d_fake + 1e-12),
-            name='generator_loss'
-        )
+            loss = reconstruct_coef * reconstruction_loss + (1 - reconstruct_coef) * adversarial_loss
 
-        loss = reconstruct_coef * reconstruction_loss + (1 - reconstruct_coef) * adversarial_loss
-
-        opt = tf.train.AdamOptimizer(learning_rate=1e-5).minimize(
-            loss,
-            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='context'),
-            name='context_encoder_solver'
-        )
+            var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='context_encoder')
+            var_list += tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='context_decoder')
+            opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(
+                loss,
+                var_list=var_list,
+                name='context_encoder_solver'
+            )
         return loss, opt, reconstruction_loss, adversarial_loss
 
     def _discriminator_loss(self):
-        discriminator_loss = -tf.reduce_mean(
-            tf.log(self.d_real + 1e-12) + tf.log(1. - self.d_fake + 1e-12),
-            name='discriminator_loss'
-        )
+        with tf.variable_scope(name_or_scope="discriminator_loss"):
+            discriminator_loss = -tf.reduce_mean(
+                tf.log(self.d_real + 1e-12) + tf.log(1. - self.d_fake + 1e-12),
+                name='discriminator_loss'
+            )
 
-        opt = tf.train.AdamOptimizer(learning_rate=1e-6).minimize(
-            discriminator_loss,
-            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'),
-            name='discriminator_solver'
-        )
+            opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate / 10).minimize(
+                discriminator_loss,
+                var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'),
+                name='discriminator_solver'
+            )
         return discriminator_loss, opt
 
     def train_batch(self, session, feed_dict):
-        _, d_loss = session.run(
-            [self.d_opt, self.d_loss],
-            feed_dict=feed_dict
-        )
-        _, ce_loss, r_loss, a_loss = session.run(
-            [self.optimization, self.loss, self.reconstruction_loss, self.adversarial_loss],
-            feed_dict=feed_dict
-        )
+        with tf.variable_scope(name_or_scope="training"):
+            _, d_loss = session.run(
+                [self.d_opt, self.d_loss],
+                feed_dict=feed_dict
+            )
+            _, ce_loss, r_loss, a_loss = session.run(
+                [self.optimization, self.loss, self.reconstruction_loss, self.adversarial_loss],
+                feed_dict=feed_dict
+            )
         return ce_loss, r_loss, a_loss, d_loss
 
     def compute_batch(self, session, feed_dict):
-        feed_dict[self.is_training] = False
-        image, masked, decoded = session.run(
-            [self.image_batch, self.masked_batch, self.output_padded],
-            feed_dict=feed_dict
-        )
+        with tf.variable_scope(name_or_scope="compute"):
+            feed_dict[self.is_training] = False
+            image, masked, decoded = session.run(
+                [self.image_batch, self.masked_batch, self.output_padded],
+                feed_dict=feed_dict
+            )
         return image, masked, decoded
 
+    def print_images(self, session, feed_dict, directory):
+        with tf.variable_scope(name_or_scope="print_images"):
+            feed_dict[self.is_training] = False
 
-def main():
-    (x_train, y_train), (x_test, y_test) = bbox.create_cifar10()
-    blank_dim = [i//4 for i in x_train.shape[1:3]]
+            combined_images = self.masked_batch + self.output_padded
+            combined_images = tf.image.convert_image_dtype(combined_images, tf.uint8)
+            tiled_images = image_grid(combined_images, size=4)
+            png = tf.image.encode_png(tiled_images)
+
+            def name_new_tiled_image(direct):
+                direct = Path(direct)
+                direct.mkdir(exist_ok=True)
+                contents = sorted(direct.glob('epoch_*.png'))
+                try:
+                    current_count = contents[-1].name.split(sep='_')[-1].split(sep='.')[0]
+                except IndexError:
+                    current_count = -1
+
+                if int(current_count) < 9:
+                    return '0' + str(int(current_count) + 1)
+                else:
+                    return str(int(current_count) + 1)
+            write = tf.write_file(str(Path(directory, 'epoch_' + name_new_tiled_image(directory) + '.png')), png)
+
+            tiled, _ = session.run([tiled_images, write], feed_dict=feed_dict)
+            return tiled
+
+
+def main(tensorboard=False, save_directory=False):
+    (x_train, y_train), (x_test, y_test) = create_cifar10()
     batch_size = 500
-    epochs = 2
-
-    mask = bbox.create_square_mask(image_shape=x_train.shape[1:], blank_dim=blank_dim)
+    epochs = 10
 
     train_dataset, valid_dataset = [
-        bbox.create_dataset(
+        create_dataset(
             x,
             y,
-            batch_size=batch_size,
+            batch_size=z,
             image_shape=x.shape[1:],
-        ) for x, y in zip((x_train, x_test), (y_train, y_test))
+        ) for x, y, z in zip((x_train, x_test), (y_train, y_test), (batch_size, 25))
     ]
 
     handle = tf.placeholder(tf.string, shape=[])
@@ -217,9 +286,26 @@ def main():
     image, label = iterator.get_next()
 
     ce = ContextEncoder(image)
+    saver = tf.train.Saver()
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
+
+        if tensorboard:
+            writer = tf.summary.FileWriter('/tmp/contextencoder/1')
+            writer.add_graph(sess.graph)
+
+        if save_directory:
+            save_directory = Path(save_directory)
+            save_directory.mkdir(exist_ok=True)
+            images_dir = Path(save_directory, 'images')
+            images_dir.mkdir(exist_ok=True)
+            weight_dir = Path(save_directory, 'models')
+            weight_dir.mkdir(exist_ok=True)
+
+
+        valid_iterator = valid_dataset.make_one_shot_iterator()
+        valid_handle = sess.run(valid_iterator.string_handle())
 
         for _ in range(epochs):
             train_iterator = train_dataset.make_one_shot_iterator()
@@ -231,15 +317,11 @@ def main():
                     break
             print(f'ce: {ce_loss}, rec: {r_loss}, adv: {a_loss}, dis: {d_loss}')
 
-        valid_iterator = valid_dataset.make_one_shot_iterator()
-        valid_handle = sess.run(valid_iterator.string_handle())
-
-        image, masked, decoded = ce.compute_batch(sess, feed_dict={handle: valid_handle})
-        plt.imshow(masked[0])
-        plt.show()
-        plt.imshow(masked[0] + decoded[0])
-        plt.show()
+            # _, masked, decoded = ce.compute_batch(sess, feed_dict={handle: valid_handle})
+            if save_directory:
+                _ = ce.print_images(sess, feed_dict={handle: valid_handle}, directory=images_dir)
+                saver.save(sess, str(Path(weight_dir, 'save.ckpt')))
 
 
 if __name__ == '__main__':
-    main()
+    main(tensorboard=False, save_directory=Path(Path(__file__).parent, 'save_here'))
