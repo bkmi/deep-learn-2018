@@ -258,6 +258,10 @@ class ContextEncoder:
                     current_count = -1
 
                 if int(current_count) < 9:
+                    return '000' + str(int(current_count) + 1)
+                elif int(current_count) < 99:
+                    return '00' + str(int(current_count) + 1)
+                elif int(current_count) < 999:
                     return '0' + str(int(current_count) + 1)
                 else:
                     return str(int(current_count) + 1)
