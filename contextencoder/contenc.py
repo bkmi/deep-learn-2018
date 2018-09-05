@@ -274,8 +274,8 @@ class ContextEncoder:
 
 def main(tensorboard=False, save_directory=False):
     (x_train, y_train), (x_test, y_test) = create_cifar10()
-    batch_size = 500
-    epochs = 10
+    batch_size = 100
+    epochs = 10000
 
     train_dataset, valid_dataset = [
         create_dataset(
