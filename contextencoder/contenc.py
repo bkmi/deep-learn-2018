@@ -23,15 +23,14 @@ def image_grid(x, size=4):
 
 def create_cifar10(normalize=True, squeeze=True):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-    if normalize:
-        x_train = tf.map_fn(lambda im: tf.image.per_image_standardization(im), x_train)
-        x_test = tf.map_fn(lambda im: tf.image.per_image_standardization(im), x_test)
+    # if normalize:
+    #     x_train, x_test = (i / x_train.max() for i in (x_train, x_test))
     if squeeze:
         y_train, y_test = (i.squeeze() for i in (y_train, y_test))
     return (x_train, y_train), (x_test, y_test)
 
 
-def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shape=(), buffer_size=10000):
+def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shape=(), buffer_size=10000, repeat=False):
     def gen():
         for image, label in zip(data, labels):
             yield image, label
@@ -40,12 +39,15 @@ def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shap
         (tf.float32, tf.int32),
         (image_shape, label_shape)
     )
-    return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size)
+    if repeat:
+        return ds.map(lambda x, y: (x, y)).repeat().shuffle(buffer_size=buffer_size).batch(batch_size)
+    else:
+        return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size)
 
 
 class ContextEncoder:
     def __init__(self, batch_tensor, filters=48, count_conv=4, learning_rate=1e-3):
-        self.image_batch = batch_tensor
+        self.image_batch = tf.map_fn(lambda im: tf.image.per_image_standardization(im), batch_tensor)
         self.image_dim = [int(i) for i in self.image_batch.shape[1:]]
         self.mask_dim = [self.image_dim[0] // 4, self.image_dim[1] // 4, 3]
         self.border_px = 2
@@ -283,7 +285,8 @@ def main(tensorboard=False, save_directory=False):
             y,
             batch_size=z,
             image_shape=x.shape[1:],
-        ) for x, y, z in zip((x_train, x_test), (y_train, y_test), (batch_size, 25))
+            repeat=w
+        ) for x, y, z, w in zip((x_train, x_test), (y_train, y_test), (batch_size, 25), (True, False))
     ]
 
     handle = tf.placeholder(tf.string, shape=[])
@@ -312,7 +315,7 @@ def main(tensorboard=False, save_directory=False):
         valid_iterator = valid_dataset.make_one_shot_iterator()
         valid_handle = sess.run(valid_iterator.string_handle())
 
-        for _ in range(epochs):
+        for ep in range(epochs):
             train_iterator = train_dataset.make_one_shot_iterator()
             train_handle = sess.run(train_iterator.string_handle())
             while True:
@@ -323,7 +326,7 @@ def main(tensorboard=False, save_directory=False):
             print(f'ce: {ce_loss}, rec: {r_loss}, adv: {a_loss}, dis: {d_loss}')
 
             # _, masked, decoded = ce.compute_batch(sess, feed_dict={handle: valid_handle})
-            if save_directory:
+            if save_directory & (ep % 10):
                 _ = ce.print_images(sess, feed_dict={handle: valid_handle}, directory=images_dir)
                 saver.save(sess, str(Path(weight_dir, 'save.ckpt')))
 
