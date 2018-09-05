@@ -24,7 +24,8 @@ def image_grid(x, size=4):
 def create_cifar10(normalize=True, squeeze=True):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
     if normalize:
-        x_train, x_test = (i / x_train.max() for i in (x_train, x_test))
+        x_train = tf.map_fn(lambda im: tf.image.per_image_standardization(im), x_train)
+        x_test = tf.map_fn(lambda im: tf.image.per_image_standardization(im), x_test)
     if squeeze:
         y_train, y_test = (i.squeeze() for i in (y_train, y_test))
     return (x_train, y_train), (x_test, y_test)
@@ -68,7 +69,7 @@ class ContextEncoder:
         with tf.variable_scope('masked_input'):
             self.masked_batch = tf.add(
                 tf.cast(~self.mask, dtype=tf.float32) * self.image_batch,
-                0.5 * tf.cast(self.mask, dtype=tf.float32)
+                tf.reduce_mean(self.image_batch, axis=[1, 2], keepdims=True) * tf.cast(self.mask, dtype=tf.float32)
             )
         with tf.variable_scope('cutout'):
             self.cutout_batch = tf.reshape(
