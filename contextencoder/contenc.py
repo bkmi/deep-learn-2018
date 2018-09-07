@@ -47,8 +47,9 @@ def create_dataset(data, labels, batch_size, image_shape=(28, 28, 1), label_shap
 
 class ContextEncoder:
     def __init__(self, batch_tensor, filters=48, count_conv=4, learning_rate=1e-3):
-        self.image_batch = tf.map_fn(lambda im: tf.image.per_image_standardization(im), batch_tensor)
-        self.image_dim = [int(i) for i in self.image_batch.shape[1:]]
+        self.image_batch = batch_tensor / tf.reduce_max(batch_tensor)
+        self.whitened_image_batch = tf.map_fn(lambda im: tf.image.per_image_standardization(im), self.image_batch)
+        self.image_dim = [int(i) for i in self.whitened_image_batch.shape[1:]]
         self.mask_dim = [self.image_dim[0] // 4, self.image_dim[1] // 4, 3]
         self.border_px = 2
         self.learning_rate = learning_rate
@@ -68,14 +69,19 @@ class ContextEncoder:
         with tf.variable_scope('border_region'):
             self.border = tf.logical_xor(self.mask, self.over)
 
+        with tf.variable_scope('whitened_masked_input'):
+            self.whitened_masked_batch = tf.add(
+                tf.cast(~self.mask, dtype=tf.float32) * self.whitened_image_batch,
+                tf.reduce_mean(self.whitened_image_batch, axis=[1, 2], keepdims=True) * tf.cast(self.mask, dtype=tf.float32)
+            )
         with tf.variable_scope('masked_input'):
             self.masked_batch = tf.add(
                 tf.cast(~self.mask, dtype=tf.float32) * self.image_batch,
-                tf.reduce_mean(self.image_batch, axis=[1, 2], keepdims=True) * tf.cast(self.mask, dtype=tf.float32)
+                tf.reduce_mean(self.whitened_image_batch, axis=[1, 2], keepdims=True) * tf.cast(self.mask, dtype=tf.float32)
             )
         with tf.variable_scope('cutout'):
             self.cutout_batch = tf.reshape(
-                tf.boolean_mask(self.image_batch, self.mask, axis=1), shape=[-1] + self.mask_dim
+                tf.boolean_mask(self.whitened_image_batch, self.mask, axis=1), shape=[-1] + self.mask_dim
             )
 
         self.is_training = tf.placeholder_with_default(True, shape=(), name='is_training')
@@ -97,8 +103,8 @@ class ContextEncoder:
         with tf.variable_scope('padded_decoded_including_overlap'):
             self.padded_decoded = tf.image.resize_image_with_crop_or_pad(
                 self.decoded,
-                int(self.image_batch.shape[1]),
-                int(self.image_batch.shape[2])
+                int(self.whitened_image_batch.shape[1]),
+                int(self.whitened_image_batch.shape[2])
             )
         with tf.variable_scope('output_batch'):
             self.output_batch = tf.reshape(
@@ -123,7 +129,7 @@ class ContextEncoder:
         with tf.variable_scope('context_encoder'):
             conv_kwargs = {'kernel_size': 3, 'padding': 'valid', 'activation': tf.nn.leaky_relu}
             count_filters = self.filters // (2 ** (self.count_conv - 1))
-            x = tf.layers.conv2d(self.masked_batch, strides=1, filters=count_filters, **conv_kwargs)
+            x = tf.layers.conv2d(self.whitened_masked_batch, strides=1, filters=count_filters, **conv_kwargs)
             x = tf.layers.batch_normalization(x, training=self.is_training)
             for i in range(self.count_conv):
                 count_filters = self.filters // (2 ** (self.count_conv - i - 1))
@@ -237,47 +243,48 @@ class ContextEncoder:
         with tf.variable_scope(name_or_scope="compute"):
             feed_dict[self.is_training] = False
             image, masked, decoded = session.run(
-                [self.image_batch, self.masked_batch, self.output_padded],
+                [self.whitened_image_batch, self.whitened_masked_batch, self.output_padded],
                 feed_dict=feed_dict
             )
         return image, masked, decoded
 
     def print_images(self, session, feed_dict, directory):
-        with tf.variable_scope(name_or_scope="print_images"):
-            feed_dict[self.is_training] = False
+        with tf.device('/cpu:0'):
+            with tf.variable_scope(name_or_scope="print_images"):
+                feed_dict[self.is_training] = False
 
-            combined_images = self.masked_batch + self.output_padded
-            combined_images = tf.image.convert_image_dtype(combined_images, tf.uint8)
-            tiled_images = image_grid(combined_images, size=4)
-            png = tf.image.encode_png(tiled_images)
+                combined_images = self.masked_batch + self.output_padded
+                combined_images = tf.image.convert_image_dtype(combined_images, tf.uint8)
+                tiled_images = image_grid(combined_images, size=4)
+                png = tf.image.encode_png(tiled_images)
 
-            def name_new_tiled_image(direct):
-                direct = Path(direct)
-                direct.mkdir(exist_ok=True)
-                contents = sorted(direct.glob('epoch_*.png'))
-                try:
-                    current_count = contents[-1].name.split(sep='_')[-1].split(sep='.')[0]
-                except IndexError:
-                    current_count = -1
+                def name_new_tiled_image(direct):
+                    direct = Path(direct)
+                    direct.mkdir(exist_ok=True)
+                    contents = sorted(direct.glob('epoch_*.png'))
+                    try:
+                        current_count = contents[-1].name.split(sep='_')[-1].split(sep='.')[0]
+                    except IndexError:
+                        current_count = -1
 
-                if int(current_count) < 9:
-                    return '000' + str(int(current_count) + 1)
-                elif int(current_count) < 99:
-                    return '00' + str(int(current_count) + 1)
-                elif int(current_count) < 999:
-                    return '0' + str(int(current_count) + 1)
-                else:
-                    return str(int(current_count) + 1)
-            write = tf.write_file(str(Path(directory, 'epoch_' + name_new_tiled_image(directory) + '.png')), png)
+                    if int(current_count) < 9:
+                        return '000' + str(int(current_count) + 1)
+                    elif int(current_count) < 99:
+                        return '00' + str(int(current_count) + 1)
+                    elif int(current_count) < 999:
+                        return '0' + str(int(current_count) + 1)
+                    else:
+                        return str(int(current_count) + 1)
+                write = tf.write_file(str(Path(directory, 'epoch_' + name_new_tiled_image(directory) + '.png')), png)
 
-            tiled, _ = session.run([tiled_images, write], feed_dict=feed_dict)
+                tiled, _ = session.run([tiled_images, write], feed_dict=feed_dict)
             return tiled
 
 
 def main(tensorboard=False, save_directory=False):
     (x_train, y_train), (x_test, y_test) = create_cifar10()
     batch_size = 100
-    epochs = 10000
+    epochs = 2000
 
     train_dataset, valid_dataset = [
         create_dataset(
@@ -286,7 +293,7 @@ def main(tensorboard=False, save_directory=False):
             batch_size=z,
             image_shape=x.shape[1:],
             repeat=w
-        ) for x, y, z, w in zip((x_train, x_test), (y_train, y_test), (batch_size, 25), (True, False))
+        ) for x, y, z, w in zip((x_train, x_test), (y_train, y_test), (batch_size, 25), (False, True))
     ]
 
     handle = tf.placeholder(tf.string, shape=[])
@@ -311,7 +318,6 @@ def main(tensorboard=False, save_directory=False):
             weight_dir = Path(save_directory, 'models')
             weight_dir.mkdir(exist_ok=True)
 
-
         valid_iterator = valid_dataset.make_one_shot_iterator()
         valid_handle = sess.run(valid_iterator.string_handle())
 
@@ -326,7 +332,7 @@ def main(tensorboard=False, save_directory=False):
             print(f'ce: {ce_loss}, rec: {r_loss}, adv: {a_loss}, dis: {d_loss}')
 
             # _, masked, decoded = ce.compute_batch(sess, feed_dict={handle: valid_handle})
-            if save_directory & (ep % 10):
+            if save_directory and (ep % 10 == 0):
                 _ = ce.print_images(sess, feed_dict={handle: valid_handle}, directory=images_dir)
                 saver.save(sess, str(Path(weight_dir, 'save.ckpt')))
 
