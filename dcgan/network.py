@@ -39,30 +39,10 @@ class DCGAN:
         )
 
     def _generator(self, latent):
-        with tf.variable_scope(name_or_scope="generator"):
-            x = tf.layers.dense(latent, 4 * 4 * 512, activation=None)
-            x = tf.layers.batch_normalization(x, training=self.is_training)
-            x = tf.reshape(x, shape=(-1, 4, 4, 512))  # 4, 4
-            x = tf.layers.conv2d_transpose(x, filters=256, kernel_size=3, strides=2, activation=tf.nn.relu)  # 7, 7
-            x = tf.layers.batch_normalization(x, training=self.is_training)
-            x = tf.layers.conv2d_transpose(x, filters=128, kernel_size=2, strides=2, activation=tf.nn.relu)  # 14, 14
-            x = tf.layers.batch_normalization(x, training=self.is_training)
-            x = tf.layers.conv2d_transpose(x, filters=1, kernel_size=2, strides=2, activation=tf.nn.tanh)  # 28, 28
-        return x
+        NotImplementedError('Base class')
 
     def _discriminator(self, image, reuse=False):
-        conv_kwargs = {'kernel_size': 2, 'strides': 2, 'activation': tf.nn.leaky_relu, 'reuse': reuse}
-        bnorm_kwargs = {'training': self.is_training, 'reuse': reuse}
-        with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
-            x = tf.layers.conv2d(image, filters=128, name='c0', **conv_kwargs)
-            x = tf.layers.batch_normalization(x, name='b0', **bnorm_kwargs)
-            x = tf.layers.conv2d(x, filters=256, name='c1', **conv_kwargs)
-            x = tf.layers.batch_normalization(x, name='b1', **bnorm_kwargs)
-            x = tf.layers.conv2d(x, filters=512, name='c2', **conv_kwargs)
-            x = tf.layers.batch_normalization(x, name='b2', **bnorm_kwargs)
-            x = tf.layers.dense(x, 3 * 3 * 512, activation=tf.nn.sigmoid, name='d0', reuse=reuse)
-            x = tf.layers.batch_normalization(x, name='b3', **bnorm_kwargs)
-        return x
+        NotImplementedError('Base class')
 
     @lazy_property
     def _generator_loss(self):
@@ -98,3 +78,67 @@ class DCGAN:
                 feed_dict=feed_dict
             )
         return images
+
+
+class MNISTDCGAN(DCGAN):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _generator(self, latent):
+        with tf.variable_scope(name_or_scope="generator"):
+            x = tf.layers.dense(latent, 3 * 3 * 512, activation=None)
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.reshape(x, shape=(-1, 3, 3, 512))  # 3, 3
+            x = tf.layers.conv2d_transpose(x, filters=256, kernel_size=3, strides=2, activation=tf.nn.relu)  # 7, 7
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=128, kernel_size=2, strides=2, activation=tf.nn.relu)  # 14, 14
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=1, kernel_size=2, strides=2, activation=tf.nn.tanh)  # 28, 28
+        return x
+
+    def _discriminator(self, image, reuse=False):
+        conv_kwargs = {'kernel_size': 2, 'strides': 2, 'activation': tf.nn.leaky_relu, 'reuse': reuse}
+        bnorm_kwargs = {'training': self.is_training, 'reuse': reuse}
+        with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
+            x = tf.layers.conv2d(image, filters=128, name='c0', **conv_kwargs)  # 14, 14
+            x = tf.layers.batch_normalization(x, name='b0', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, filters=256, name='c1', **conv_kwargs)  # 7, 7
+            x = tf.layers.batch_normalization(x, name='b1', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, filters=512, name='c2', **conv_kwargs)  # 3, 3
+            x = tf.layers.batch_normalization(x, name='b2', **bnorm_kwargs)
+            x = tf.layers.flatten(x, name='flat')
+            x = tf.layers.dense(x, 1, activation=tf.nn.sigmoid, name='d0', reuse=reuse)
+            x = tf.layers.batch_normalization(x, name='b3', **bnorm_kwargs)
+        return x
+
+
+class CIFARDCGAN(DCGAN):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _generator(self, latent):
+        with tf.variable_scope(name_or_scope="generator"):
+            x = tf.layers.dense(latent, 4 * 4 * 512, activation=None)
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.reshape(x, shape=(-1, 4, 4, 512))  # 4, 4
+            x = tf.layers.conv2d_transpose(x, filters=256, kernel_size=3, strides=2, activation=tf.nn.relu)  # 7, 7
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=128, kernel_size=2, strides=2, activation=tf.nn.relu)  # 14, 14
+            x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=1, kernel_size=2, strides=2, activation=tf.nn.tanh)  # 28, 28
+        return x
+
+    def _discriminator(self, image, reuse=False):
+        conv_kwargs = {'kernel_size': 2, 'strides': 2, 'activation': tf.nn.leaky_relu, 'reuse': reuse}
+        bnorm_kwargs = {'training': self.is_training, 'reuse': reuse}
+        with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
+            x = tf.layers.conv2d(image, filters=128, name='c0', **conv_kwargs)  # 14, 14
+            x = tf.layers.batch_normalization(x, name='b0', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, filters=256, name='c1', **conv_kwargs)  # 7, 7
+            x = tf.layers.batch_normalization(x, name='b1', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, filters=512, name='c2', **conv_kwargs)  # 3, 3
+            x = tf.layers.batch_normalization(x, name='b2', **bnorm_kwargs)
+            x = tf.layers.flatten(x, name='flat')
+            x = tf.layers.dense(x, 1, activation=tf.nn.sigmoid, name='d0', reuse=reuse)
+            x = tf.layers.batch_normalization(x, name='b3', **bnorm_kwargs)
+        return x
