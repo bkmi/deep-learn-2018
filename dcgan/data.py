@@ -39,7 +39,7 @@ def create_fashion_mnist(scale_tanh=True, squeeze_y=True):
     return create_keras_dataset(tf.keras.datasets.fashion_mnist.load_data(), scale_tanh=scale_tanh, squeeze_y=squeeze_y)
 
 
-def create_dataset(images, labels, batch_size, buffer_size=10000, repeat=False):
+def create_dataset(images, labels, batch_size, buffer_size=10000, repeat=False, drop_remainder=True):
     def gen():
         for image, label in zip(images, labels):
             yield image, label
@@ -49,6 +49,6 @@ def create_dataset(images, labels, batch_size, buffer_size=10000, repeat=False):
         (images.shape[1:], labels.shape[1:])
     )
     if repeat:
-        return ds.map(lambda x, y: (x, y)).repeat().shuffle(buffer_size=buffer_size).batch(batch_size)
+        return ds.map(lambda x, y: (x, y)).repeat().shuffle(buffer_size=buffer_size).batch(batch_size, drop_remainder=drop_remainder)
     else:
-        return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size)
+        return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size, drop_remainder=drop_remainder)
