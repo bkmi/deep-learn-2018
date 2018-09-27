@@ -21,7 +21,7 @@ handle = tf.placeholder(tf.string, shape=[])
 iterator = tf.data.Iterator.from_string_handle(handle, train_dataset.output_types, train_dataset.output_shapes)
 image, label = iterator.get_next()
 
-latent = tf.random_uniform(shape=[batch_size, *x_train.shape[1:]], minval=-1, maxval=1)
+latent = tf.random_uniform(shape=[batch_size, 100], minval=-1, maxval=1)
 
 gan = MNISTDCGAN(image, latent, learning_rate=0.0002, beta1=0.5, log_bias=1e-12)
 
@@ -37,7 +37,6 @@ with tf.Session() as sess:
         while True:
             try:
                 d_loss, g_loss = gan.train_batch(sess, feed_dict={handle: train_handle})
-                print(f'd_loss: {d_loss}, g_loss: {g_loss}')
             except tf.errors.OutOfRangeError:
                 break
         print(f'd_loss: {d_loss}, g_loss: {g_loss}')
