@@ -35,10 +35,7 @@ with tf.Session() as sess:
     valid_iterator = valid_dataset.make_one_shot_iterator()
     valid_handle = sess.run(valid_iterator.string_handle())
 
-    counter = 0
     for ep in range(epochs):
-        counter += 1
-
         train_iterator = train_dataset.make_one_shot_iterator()
         train_handle = sess.run(train_iterator.string_handle())
 
