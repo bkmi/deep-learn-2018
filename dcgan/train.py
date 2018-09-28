@@ -42,10 +42,6 @@ with tf.Session() as sess:
         train_iterator = train_dataset.make_one_shot_iterator()
         train_handle = sess.run(train_iterator.string_handle())
 
-        if True and (ep % 100 == 0):
-            saver.save(sess, str(Path(saver_helper.models_dir, f'save{ep}.ckpt')))
-            gan.write_grid(sess, path=Path(saver_helper.images_dir, f'epoch_{ep}.png'))
-
         while True:
             try:
                 d_loss, g_loss = gan.train_batch(sess, feed_dict={handle: train_handle})
