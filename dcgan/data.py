@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 
+from pathlib import Path
+
 
 def scale_labeled_data(data_label_tuple, scale_tanh=True, squeeze_y=True):
     x, y = data_label_tuple
@@ -26,9 +28,9 @@ def create_cifar10(scale_tanh=True, squeeze_y=True):
 
 def create_mnist(scale_tanh=True, squeeze_y=True, expand_channels_last=True):
     (x_train, y_train), (x_test, y_test) = create_keras_dataset(
-        tf.keras.datasets.mnist.load_data()
-        , scale_tanh=scale_tanh
-        , squeeze_y=squeeze_y
+        tf.keras.datasets.mnist.load_data(),
+        scale_tanh=scale_tanh,
+        squeeze_y=squeeze_y
     )
     if expand_channels_last:
         x_train, x_test = x_train[..., np.newaxis], x_test[..., np.newaxis]
@@ -52,3 +54,14 @@ def create_dataset(images, labels, batch_size, buffer_size=10000, repeat=False, 
         return ds.map(lambda x, y: (x, y)).repeat().shuffle(buffer_size=buffer_size).batch(batch_size, drop_remainder=drop_remainder)
     else:
         return ds.map(lambda x, y: (x, y)).shuffle(buffer_size=buffer_size).batch(batch_size, drop_remainder=drop_remainder)
+
+
+class SaverHelper:
+    def __init__(self, save_directory='save', images_dir='images', models_dir='models'):
+        self.save_directory = Path(save_directory)
+        self.images_dir = Path(self.save_directory, images_dir)
+        self.models_dir = Path(self.save_directory, models_dir)
+
+        self.save_directory.mkdir(exist_ok=True)
+        self.images_dir.mkdir(exist_ok=True)
+        self.models_dir.mkdir(exist_ok=True)

@@ -1,6 +1,8 @@
 import tensorflow as tf
 import functools
 
+from pathlib import Path
+
 
 def lazy_property(function):
     # https://danijar.com/structuring-your-tensorflow-models/
@@ -70,14 +72,41 @@ class DCGAN:
             )
         return d_loss, g_loss
 
-    def generate(self, session, feed_dict):
-        with tf.variable_scope(name_or_scope="generate"):
-            feed_dict[self.is_training] = False
-            images = session.run(
-                self.fake_batch,
-                feed_dict=feed_dict
-            )
-        return images
+    @lazy_property
+    def _fake_grid(self):
+        def image_grid(x, size=4):
+            t = tf.unstack(x[:size * size], num=size * size, axis=0)
+            rows = [tf.concat(t[i * size:(i + 1) * size], axis=0)
+                    for i in range(size)]
+            image = tf.concat(rows, axis=1)
+            return image
+
+        with tf.variable_scope(name_or_scope="generate_grid"):
+            fake_batch_int = tf.image.convert_image_dtype(self.fake_batch, tf.uint8)
+            fake_grid = image_grid(fake_batch_int, size=4)
+        return fake_grid
+
+    @lazy_property
+    def _filename_grid(self):
+        return tf.placeholder_with_default(str(Path(__file__, 'image.png')), shape=())
+
+    @lazy_property
+    def _write_grid(self):
+        with tf.variable_scope(name_or_scope="write_grid"):
+            png = tf.image.encode_png(self._fake_grid)
+            write_file = tf.write_file(self._filename_grid, png)
+        return write_file
+
+    def generate(self, session):
+        tiled = session.run(self._fake_grid, feed_dict={self.is_training: False})
+        return tiled
+
+    def write_grid(self, session, path=None):
+        feed_dict = {self.is_training: False}
+        if path is not None:
+            feed_dict[self._filename_grid] = str(path)
+        session.run([self._write_grid], feed_dict=feed_dict)
+        return None
 
 
 class MNISTDCGAN(DCGAN):
