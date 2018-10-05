@@ -51,8 +51,10 @@ class DCGAN:
         self.d_fake = self._discriminator(self.fake_batch, reuse=True)
 
         self.learning_rate = learning_rate
-        self.beta1 = beta1
-        self.beta2 = beta2
+        self._beta1 = beta1
+        self._beta2 = beta2
+
+        self._g_opt, self._d_opt = self._create_opts()
 
     def _generator(self, latent):
         NotImplementedError('Base class')
@@ -68,27 +70,34 @@ class DCGAN:
         )
 
     @lazy_property
-    def _g_opt(self):
-        return tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=self.beta1, beta2=self.beta2).minimize(
-            self.generator_loss,
-            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'),
-            name='generator_solver'
-        )
-
-    @lazy_property
     def discriminator_loss(self):
         return -tf.reduce_mean(
             tf.log(self.d_real + self.log_bias) + tf.log(1. - self.d_fake + self.log_bias),
             name='discriminator_loss'
         )
 
-    @lazy_property
-    def _d_opt(self):
-        return tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=self.beta1, beta2=self.beta2).minimize(
+    def _create_opts(self):
+        g_opt = tf.train.AdamOptimizer(
+            learning_rate=self.learning_rate,
+            beta1=self._beta1,
+            beta2=self._beta2
+        ).minimize(
+            self.generator_loss,
+            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'),
+            name='generator_solver'
+        )
+
+        d_opt = tf.train.AdamOptimizer(
+            learning_rate=self.learning_rate,
+            beta1=self._beta1,
+            beta2=self._beta2
+        ).minimize(
             self.discriminator_loss,
             var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'),
             name='discriminator_solver'
         )
+
+        return g_opt, d_opt
 
     def train_batch(self, session, feed_dict):
         with tf.variable_scope(name_or_scope="training"):
@@ -215,24 +224,22 @@ class WassersteinMnistDcgan(MNISTDCGAN):
         return -tf.reduce_mean(self.d_fake, name='generator_loss')
 
     @lazy_property
-    def _g_opt(self):
-        return tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(
+    def discriminator_loss(self):
+        return tf.reduce_mean(self.d_fake - self.d_real, name='discriminator_loss')
+
+    def _create_opts(self):
+        g_opt = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(
             self.generator_loss,
             var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator'),
             name='generator_solver'
         )
 
-    @lazy_property
-    def discriminator_loss(self):
-        return tf.reduce_mean(self.d_fake - self.d_real, name='discriminator_loss')
-
-    @lazy_property
-    def _d_opt(self):
-        return tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(
+        d_opt = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(
             self.discriminator_loss,
             var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator'),
             name='discriminator_solver'
         )
+        return g_opt, d_opt
 
     @lazy_property
     def _clip_d(self):

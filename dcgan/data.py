@@ -57,11 +57,14 @@ def create_dataset(images, labels, batch_size, buffer_size=10000, repeat=False, 
 
 
 class SaverHelper:
-    def __init__(self, save_directory='save', images_dir='images', models_dir='models'):
+    def __init__(self, save_directory='save', images_dir='images', models_dir='models', mkdir=False):
         self.save_directory = Path(save_directory)
         self.images_dir = Path(self.save_directory, images_dir)
         self.models_dir = Path(self.save_directory, models_dir)
 
-        self.save_directory.mkdir(exist_ok=True)
-        self.images_dir.mkdir(exist_ok=True)
-        self.models_dir.mkdir(exist_ok=True)
+        if mkdir:
+            self.save_directory.mkdir(exist_ok=True)
+            self.images_dir.mkdir(exist_ok=True)
+            self.models_dir.mkdir(exist_ok=True)
+        else:
+            pass
