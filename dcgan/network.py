@@ -159,36 +159,75 @@ class DCGAN:
 
 class MNISTDCGAN(DCGAN):
     def __init__(self, *args, **kwargs):
-        self.filters_max = 64
+        self.dim = 64
         super().__init__(*args, **kwargs)
 
     def _generator(self, latent):
+        conv_kwargs = {'kernel_size': 5, 'strides': 2, 'padding': 'SAME'}
+        with tf.variable_scope(name_or_scope="generator"):
+            x = tf.layers.dense(latent, 4*4*4*self.dim, activation=tf.nn.relu)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.reshape(x, shape=(-1, 4, 4, 4*self.dim))
+            x = tf.layers.conv2d_transpose(x, filters=2*self.dim, activation=tf.nn.relu, **conv_kwargs)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=self.dim, activation=tf.nn.relu, **conv_kwargs)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, training=self.is_training)
+            x = tf.layers.conv2d_transpose(x, filters=1, activation=tf.nn.tanh, **conv_kwargs)
+        return x
+
+    def _discriminator(self, image, reuse=False):
+        conv_kwargs = {
+            'kernel_size': 5,
+            'strides': 2,
+            'activation': tf.nn.leaky_relu,
+            'reuse': reuse,
+            'padding': 'SAME'
+        }
+        bnorm_kwargs = {'training': self.is_training, 'reuse': reuse}
+        with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
+            x = tf.layers.conv2d(image, name='c0', filters=self.dim, **conv_kwargs)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, name='b0', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, name='c1', filters=2*self.dim, **conv_kwargs)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, name='b1', **bnorm_kwargs)
+            x = tf.layers.conv2d(x, name='c2', filters=4*self.dim, **conv_kwargs)
+            if self._use_batch_norm:
+                x = tf.layers.batch_normalization(x, name='b2', **bnorm_kwargs)
+            x = tf.layers.flatten(x, name='flat')
+            x = tf.layers.dense(x, 1, name='d0', activation=None, reuse=reuse)
+        return x
+
+    def _generator_old(self, latent):
         conv_kwargs = {'kernel_size': 5, 'strides': 2, 'activation': tf.nn.relu}
         with tf.variable_scope(name_or_scope="generator"):
-            x = tf.layers.dense(latent, 3 * 3 * self.filters_max, activation=None)
+            x = tf.layers.dense(latent, 3 * 3 * self.dim, activation=None)
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, training=self.is_training)
-            x = tf.reshape(x, shape=(-1, 3, 3, self.filters_max))  # 3, 3
-            x = tf.layers.conv2d_transpose(x, filters=self.filters_max // 2, kernel_size=3, strides=2, activation=tf.nn.relu)  # 7, 7
+            x = tf.reshape(x, shape=(-1, 3, 3, self.dim))  # 3, 3
+            x = tf.layers.conv2d_transpose(x, filters=self.dim // 2, kernel_size=3, strides=2, activation=tf.nn.relu)  # 7, 7
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, training=self.is_training)
-            x = tf.layers.conv2d_transpose(x, filters=self.filters_max // 4, kernel_size=2, strides=2, activation=tf.nn.relu)  # 14, 14
+            x = tf.layers.conv2d_transpose(x, filters=self.dim // 4, kernel_size=2, strides=2, activation=tf.nn.relu)  # 14, 14
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, training=self.is_training)
             x = tf.layers.conv2d_transpose(x, filters=1, kernel_size=2, strides=2, activation=tf.nn.tanh)  # 28, 28
         return x
 
-    def _discriminator(self, image, reuse=False):
+    def _discriminator_old(self, image, reuse=False):
         conv_kwargs = {'kernel_size': 2, 'strides': 2, 'activation': tf.nn.leaky_relu, 'reuse': reuse}
         bnorm_kwargs = {'training': self.is_training, 'reuse': reuse}
         with tf.variable_scope(name_or_scope="discriminator", reuse=reuse):
-            x = tf.layers.conv2d(image, filters=self.filters_max // 4, name='c0', **conv_kwargs)  # 14, 14
+            x = tf.layers.conv2d(image, filters=self.dim // 4, name='c0', **conv_kwargs)  # 14, 14
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, name='b0', **bnorm_kwargs)
-            x = tf.layers.conv2d(x, filters=self.filters_max // 2, name='c1', **conv_kwargs)  # 7, 7
+            x = tf.layers.conv2d(x, filters=self.dim // 2, name='c1', **conv_kwargs)  # 7, 7
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, name='b1', **bnorm_kwargs)
-            x = tf.layers.conv2d(x, filters=self.filters_max, name='c2', **conv_kwargs)  # 3, 3
+            x = tf.layers.conv2d(x, filters=self.dim, name='c2', **conv_kwargs)  # 3, 3
             if self._use_batch_norm:
                 x = tf.layers.batch_normalization(x, name='b2', **bnorm_kwargs)
             x = tf.layers.flatten(x, name='flat')
@@ -309,6 +348,7 @@ class ImprovedWassersteinDCGAN(MNISTDCGAN):
             gradients = tf.gradients(self._discriminator(interpolates, reuse=True), [interpolates])[0]
             slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
             gradient_penalty = (slopes - 1.) ** 2
+            gradient_penalty = tf.Print(gradient_penalty, [alpha, interpolates, gradients, slopes])
         return tf.reduce_mean(
             self.d_fake - self.d_real + self._gradient_penalty_multiplier * gradient_penalty,
             name='discriminator_loss'

@@ -5,18 +5,20 @@ from network import MNISTDCGAN
 from pathlib import Path
 from absl import flags, app
 
+
 GANTYPE_HELP = 'dcgan, wgan, iwgan'
 flags.DEFINE_string('gantype', 'dcgan', GANTYPE_HELP)
-flags.DEFINE_bool('savepics', False, 'Bool save pictures?')
-flags.DEFINE_bool('savemodels', False, 'Bool save models?')
+flags.DEFINE_bool('savepics', False, 'Save pictures?')
+flags.DEFINE_bool('savemodels', False, 'Save models?')
 flags.DEFINE_integer('epochs', 1000, 'Integer number of training epochs.')
+flags.DEFINE_bool('gpu', True, 'Use gpu?')
 
 FLAGS = flags.FLAGS
 
 
 def main(_):
     (x_train, y_train), (x_test, y_test) = create_mnist()
-    batch_size = 128
+    batch_size = 64
 
     train_dataset, valid_dataset = [
         create_dataset(
@@ -34,13 +36,13 @@ def main(_):
     latent = tf.random_uniform(shape=[batch_size, 100], minval=-1, maxval=1)
 
     if FLAGS.gantype == 'dcgan':
-        gan = MNISTDCGAN(image, latent, learning_rate=0.0002, beta1=0.5, log_bias=1e-12)
+        gan = MNISTDCGAN(image, latent, learning_rate=0.0005, beta1=0.5, log_bias=1e-12)
         print('DCGAN')
     elif FLAGS.gantype == 'wgan':
         gan = MNISTDCGAN(image, latent, learning_rate=5e-5)
         print('WGAN')
     elif FLAGS.gantype == 'iwgan':
-        gan = MNISTDCGAN(image, latent, learning_rate=1e-4, beta1=0.5)
+        gan = MNISTDCGAN(image, latent, learning_rate=1e-4, beta1=0.5, beta2=0.9)
         print('IWGAN')
     else:
         raise ValueError('Must choose between :' + GANTYPE_HELP)
@@ -53,7 +55,19 @@ def main(_):
         saver_helper = SaverHelper(mkdir=False)
         print('NOT making save dir')
 
-    with tf.Session() as sess:
+    # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1)
+    # config = tf.ConfigProto(gpu_options=gpu_options)
+    #
+    # config = tf.ConfigProto()
+    # config.gpu_options.allow_growth = True
+    # sess = tf.Session(config=config)
+
+    if FLAGS.gpu:
+        config = tf.ConfigProto()
+    else:
+        config = tf.ConfigProto(device_count={'GPU': 0})
+
+    with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
 
         valid_iterator = valid_dataset.make_one_shot_iterator()
